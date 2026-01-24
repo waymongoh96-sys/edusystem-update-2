@@ -15,15 +15,12 @@ interface DashboardProps {
   onTaskClick: () => void;
 }
 
-const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 07:00 to 21:00
-
 const TeacherDashboard: React.FC<DashboardProps> = ({ 
   tasks, classes, settings, onClassClick, onTaskClick 
 }) => {
   const [viewMode, setViewMode] = useState<'WEEK' | 'MONTH'>('WEEK');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
-  const [showWeekends, setShowWeekends] = useState(true);
   const today = new Date();
 
   const toLocalDateString = (date: Date) => {
@@ -32,18 +29,30 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
     return adjustedDate.toISOString().split('T')[0];
   };
 
+  const dynamicHours = useMemo(() => {
+    const start = settings.startHour ?? 7;
+    const end = settings.endHour ?? 19;
+    return Array.from({ length: end - start + 1 }, (_, i) => i + start);
+  }, [settings.startHour, settings.endHour]);
+
   const currentWeekDates = useMemo(() => {
     const start = new Date(currentDate);
     const day = start.getDay();
     const diff = start.getDate() - day + (day === 0 ? -6 : 1);
     start.setDate(diff);
-    const dates = Array.from({ length: 7 }, (_, i) => {
+    
+    const allWeek = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       return d;
     });
-    return showWeekends ? dates : dates.slice(0, 5);
-  }, [currentDate, showWeekends]);
+
+    // Filter by working days from settings
+    if (settings.workingDays && settings.workingDays.length > 0) {
+      return allWeek.filter(d => settings.workingDays.includes(d.toLocaleDateString('en-US', { weekday: 'long' })));
+    }
+    return allWeek;
+  }, [currentDate, settings.workingDays]);
 
   const daysInMonth = useMemo(() => {
     const year = currentDate.getFullYear();
@@ -93,15 +102,6 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
         </div>
         
         <div className="flex items-center gap-4 bg-white p-2 rounded-[2rem] border border-slate-200 shadow-sm">
-          {viewMode === 'WEEK' && (
-            <button 
-              onClick={() => setShowWeekends(!showWeekends)}
-              className="px-4 py-2 hover:bg-slate-50 rounded-xl text-[10px] font-black theme-primary transition-all flex items-center gap-2"
-            >
-              {showWeekends ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              {showWeekends ? 'HIDE WEEKENDS' : 'SHOW WEEKENDS'}
-            </button>
-          )}
           <div className="flex bg-slate-100 p-1 rounded-2xl">
             <button 
               onClick={() => setViewMode('WEEK')}
@@ -151,7 +151,7 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                
                {/* Body Grid */}
                <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-                  {HOURS.map(hour => (
+                  {dynamicHours.map(hour => (
                     <div key={hour} className="flex min-h-[80px] border-b border-slate-50 last:border-b-0">
                        <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center">
                           <span className="text-[10px] font-black text-slate-400">{hour.toString().padStart(2, '0')}:00</span>

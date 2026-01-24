@@ -199,7 +199,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
             <div className="mt-auto space-y-3">
               <div className="flex items-center gap-3 text-slate-500"><Calendar className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">Every {cls.classDay}</span></div>
               <div className="flex items-center gap-3 text-slate-500"><Clock className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">{cls.classTime}</span></div>
-              <div className="flex items-center gap-3 text-slate-500"><Users className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">{cls.enrolledStudentIds?.length || 0} Nodes</span></div>
+              <div className="flex items-center gap-3 text-slate-500"><Users className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">{cls.enrolledStudentIds?.length || 0} Students</span></div>
             </div>
           </div>
         ))}
@@ -270,7 +270,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
                  </div>
               </div>
               <button type="submit" className="w-full theme-bg text-white py-6 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl mt-6 transition-all active:scale-95">
-                {editingClass ? 'Update Registry' : 'Initialize Node'}
+                {editingClass ? 'Update Registry' : 'Initialize Student Group'}
               </button>
             </form>
           </div>

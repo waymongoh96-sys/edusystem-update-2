@@ -96,4 +96,7 @@ export interface SystemSettings {
   lessonCategories: string[];
   taskCategories: string[];
   holidays: Holiday[];
+  workingDays: string[];
+  startHour: number;
+  endHour: number;
 }

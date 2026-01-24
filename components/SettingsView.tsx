@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { Palette, ShieldAlert, Plus, Trash2, CheckCircle2, ListChecks, Calendar } from 'lucide-react';
+import { Palette, ShieldAlert, Plus, Trash2, CheckCircle2, ListChecks, Calendar, Clock } from 'lucide-react';
 import { SystemSettings, Holiday } from '../types';
+import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -44,6 +45,16 @@ const SettingsView: React.FC<SettingsProps> = ({ settings }) => {
     updateSettings(key, list.filter((_, i) => i !== index));
   };
 
+  const toggleDay = (day: string) => {
+    const current = settings.workingDays || [];
+    const updated = current.includes(day) 
+      ? current.filter(d => d !== day) 
+      : [...current, day];
+    // Keep them in week order
+    const sorted = DAYS_OF_WEEK.filter(d => updated.includes(d));
+    updateSettings('workingDays', sorted);
+  };
+
   return (
     <div className="space-y-12 pb-20">
       <div className="border-b border-slate-200 pb-10">
@@ -52,6 +63,61 @@ const SettingsView: React.FC<SettingsProps> = ({ settings }) => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
+        {/* Dynamic Timetable Config */}
+        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
+           <div className="flex items-center gap-4 mb-10">
+              <div className="p-4 theme-light-bg rounded-3xl">
+                <Clock className="w-8 h-8 theme-primary" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-black text-slate-800">Dynamic Timetable</h3>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Calendar Grid Rules</p>
+              </div>
+           </div>
+
+           <div className="space-y-8">
+              <div className="space-y-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Active Working Days</label>
+                <div className="flex flex-wrap gap-2">
+                  {DAYS_OF_WEEK.map(day => (
+                    <button 
+                      key={day}
+                      onClick={() => toggleDay(day)}
+                      className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all border ${
+                        (settings.workingDays || []).includes(day) 
+                          ? 'theme-bg text-white theme-border shadow-md' 
+                          : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100'
+                      }`}
+                    >
+                      {day.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Start Hour (24h)</label>
+                  <input 
+                    type="number" min="0" max="23"
+                    className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-sm"
+                    value={settings.startHour}
+                    onChange={e => updateSettings('startHour', parseInt(e.target.value))}
+                  />
+                </div>
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">End Hour (24h)</label>
+                  <input 
+                    type="number" min="1" max="24"
+                    className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-sm"
+                    value={settings.endHour}
+                    onChange={e => updateSettings('endHour', parseInt(e.target.value))}
+                  />
+                </div>
+              </div>
+           </div>
+        </div>
+
         <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
            <div className="flex items-center gap-4 mb-10">
               <div className="p-4 theme-light-bg rounded-3xl">

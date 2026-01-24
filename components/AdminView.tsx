@@ -23,10 +23,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   });
 
   const stats = useMemo(() => {
-    const totalClasses = classes.length;
-    const totalStudentsTaught = classes.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
-    return { totalClasses, totalStudentsTaught };
-  }, [classes]);
+    const filteredClasses = teacherFilter === 'ALL' ? classes : classes.filter(c => c.teacherId === teacherFilter);
+    const totalClasses = filteredClasses.length;
+    const totalStudentsTaught = filteredClasses.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
+    const uniqueStudents = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds)).size;
+    return { totalClasses, totalStudentsTaught, uniqueStudents };
+  }, [classes, teacherFilter]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,6 +113,28 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   return (
     <div className="space-y-10">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Admin Dashboard</h1>
+          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Institutional Hub</p>
+        </div>
+        
+        <div className="flex items-center gap-4 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm">
+           <Filter className="w-5 h-5 text-slate-400" />
+           <div className="flex flex-col">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Filter Stats by Teacher</span>
+              <select 
+                className="bg-transparent border-none font-black text-xs text-slate-700 outline-none"
+                value={teacherFilter}
+                onChange={(e) => setTeacherFilter(e.target.value)}
+              >
+                 <option value="ALL">All Teachers (Global Overview)</option>
+                 {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+           </div>
+        </div>
+      </div>
+
       {/* Global Stats Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
@@ -125,25 +149,25 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
             <Users className="w-8 h-8 text-purple-600" />
           </div>
           <h4 className="text-3xl font-black text-slate-800">{stats.totalStudentsTaught}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Enrolled Nodes</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Enrolled Students</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-emerald-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
             <Briefcase className="w-8 h-8 text-emerald-600" />
           </div>
-          <h4 className="text-3xl font-black text-slate-800">{teachers.length}</h4>
+          <h4 className="text-3xl font-black text-slate-800">{teacherFilter === 'ALL' ? teachers.length : '1'}</h4>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Staff Count</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-blue-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
             <GraduationCap className="w-8 h-8 text-blue-600" />
           </div>
-          <h4 className="text-3xl font-black text-slate-800">{students.length}</h4>
+          <h4 className="text-3xl font-black text-slate-800">{stats.uniqueStudents}</h4>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Unique Students</p>
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-slate-100 pt-10">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Shield className="w-6 h-6 text-purple-600" />
@@ -192,20 +216,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
             Students
           </button>
         </div>
-
-        {activeTab === 'STUDENT' && (
-          <div className="flex items-center gap-3 bg-white border border-slate-200 px-4 py-2 rounded-2xl shadow-sm">
-             <Filter className="w-4 h-4 text-slate-400" />
-             <select 
-               className="bg-transparent border-none font-bold text-xs text-slate-600 outline-none"
-               value={teacherFilter}
-               onChange={(e) => setTeacherFilter(e.target.value)}
-             >
-                <option value="ALL">Filter by Staff (All)</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-             </select>
-          </div>
-        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -267,7 +277,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
               {currentList.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-8 py-20 text-center">
-                    <p className="text-slate-400 italic">No nodes found matching current filters.</p>
+                    <p className="text-slate-400 italic">No students found matching current filters.</p>
                   </td>
                 </tr>
               )}
@@ -366,8 +376,8 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <div className="bg-white rounded-3xl p-8 max-w-xl w-full shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h2 className="text-2xl font-black text-slate-800">Bulk Registry Import</h2>
-                <p className="text-sm text-slate-400 font-bold uppercase tracking-widest mt-1">Student Node Provisioning</p>
+                <h2 className="text-2xl font-black text-slate-800">Bulk Student Import</h2>
+                <p className="text-sm text-slate-400 font-bold uppercase tracking-widest mt-1">Student Account Provisioning</p>
               </div>
               <button onClick={() => setIsBulkImporting(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>

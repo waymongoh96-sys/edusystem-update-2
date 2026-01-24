@@ -270,9 +270,9 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
            <div className="flex-1 overflow-x-auto custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[900px]">
-                <thead className="sticky top-0 bg-slate-50 z-10">
+                <thead className="sticky top-0 bg-slate-50 z-30">
                   <tr className="border-b border-slate-200">
-                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Student</th>
+                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Student</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
                   </tr>
@@ -282,7 +282,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     const record = attendance.find(a => a.id === `${cls.id}-${student.id}-${selectedDate}`);
                     return (
                       <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="px-6 py-6">
+                        <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
                           <div className="flex items-center gap-4">
                             <div className="relative">
                               <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary text-xs shadow-inner">{student.name.charAt(0)}</div>
@@ -294,7 +294,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                                 <UserMinus className="w-3 h-3" />
                               </button>
                             </div>
-                            <span className="font-black text-slate-800 text-sm">{student.name}</span>
+                            <span className="font-black text-slate-800 text-sm whitespace-nowrap">{student.name}</span>
                           </div>
                         </td>
                         <td className="px-6 py-6">
@@ -544,7 +544,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
               ))}
               {students.filter(s => !cls.enrolledStudentIds.includes(s.id) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) && (filterStandard === '' || s.standard === filterStandard)).length === 0 && (
                 <div className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
-                  No matching nodes found in registry.
+                  No matching students found in registry.
                 </div>
               )}
             </div>

@@ -11,7 +11,10 @@ export const INITIAL_SETTINGS = {
   holidays: [
     { id: 'h1', date: '2025-01-01', description: "New Year's Day" },
     { id: 'h2', date: '2025-12-25', description: "Christmas Day" }
-  ]
+  ],
+  workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+  startHour: 7,
+  endHour: 19
 };
 
 export const MOCK_STUDENTS = [
