@@ -1,0 +1,5 @@
+{
+  "name": "EduAssist - Teacher Helping Hand System",
+  "description": "A comprehensive management system for teachers, admins, and students featuring automated lesson plan tracking, attendance management with performance comments, and a kanban-style task board.",
+  "requestFramePermissions": []
+}
