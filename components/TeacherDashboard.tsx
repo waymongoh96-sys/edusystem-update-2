@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Calendar as CalendarIcon, Clock, CheckCircle2, 
-  ChevronLeft, ChevronRight, ListChecks, ArrowRight, X, AlertCircle
+  ChevronLeft, ChevronRight, ListChecks, ArrowRight, X, AlertCircle, Eye, EyeOff
 } from 'lucide-react';
 import { Task, Class, SystemSettings, TaskStatus } from '../types';
 
@@ -15,15 +15,17 @@ interface DashboardProps {
   onTaskClick: () => void;
 }
 
+const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 07:00 to 21:00
+
 const TeacherDashboard: React.FC<DashboardProps> = ({ 
   tasks, classes, settings, onClassClick, onTaskClick 
 }) => {
   const [viewMode, setViewMode] = useState<'WEEK' | 'MONTH'>('WEEK');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [showWeekends, setShowWeekends] = useState(true);
   const today = new Date();
 
-  // Helper to get local YYYY-MM-DD string without timezone shifts
   const toLocalDateString = (date: Date) => {
     const offset = date.getTimezoneOffset();
     const adjustedDate = new Date(date.getTime() - (offset * 60 * 1000));
@@ -35,12 +37,13 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
     const day = start.getDay();
     const diff = start.getDate() - day + (day === 0 ? -6 : 1);
     start.setDate(diff);
-    return Array.from({ length: 7 }, (_, i) => {
+    const dates = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       return d;
     });
-  }, [currentDate]);
+    return showWeekends ? dates : dates.slice(0, 5);
+  }, [currentDate, showWeekends]);
 
   const daysInMonth = useMemo(() => {
     const year = currentDate.getFullYear();
@@ -90,6 +93,15 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
         </div>
         
         <div className="flex items-center gap-4 bg-white p-2 rounded-[2rem] border border-slate-200 shadow-sm">
+          {viewMode === 'WEEK' && (
+            <button 
+              onClick={() => setShowWeekends(!showWeekends)}
+              className="px-4 py-2 hover:bg-slate-50 rounded-xl text-[10px] font-black theme-primary transition-all flex items-center gap-2"
+            >
+              {showWeekends ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showWeekends ? 'HIDE WEEKENDS' : 'SHOW WEEKENDS'}
+            </button>
+          )}
           <div className="flex bg-slate-100 p-1 rounded-2xl">
             <button 
               onClick={() => setViewMode('WEEK')}
@@ -118,50 +130,60 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 h-[calc(100vh-18rem)]">
         <div className="xl:col-span-8 overflow-hidden h-full">
           {viewMode === 'WEEK' ? (
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-4 h-full">
-              {currentWeekDates.map((date, idx) => {
-                const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
-                const isToday = date.toDateString() === today.toDateString();
-                return (
-                  <div key={idx} className={`flex flex-col h-full rounded-[2.5rem] border transition-all ${isToday ? 'theme-border theme-light-bg shadow-lg' : 'bg-white border-slate-100'}`}>
-                    <div className="p-4 text-center border-b border-inherit">
-                      <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${isToday ? 'theme-primary' : 'text-slate-400'}`}>
-                        {date.toLocaleDateString('en-US', { weekday: 'short' })}
-                      </p>
-                      <p className={`text-xl font-black ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{date.getDate()}</p>
-                    </div>
-                    <div className="flex-1 p-3 space-y-3 overflow-y-auto custom-scrollbar">
-                      {isHoliday && (
-                        <div className="p-3 rounded-2xl bg-red-50 border border-red-100 cursor-pointer" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
-                          <p className="text-[7px] font-black text-red-600 uppercase tracking-widest mb-1">Holiday</p>
-                          <p className="text-[9px] font-bold text-red-800 leading-tight">{isHoliday.description}</p>
-                        </div>
-                      )}
-                      {dayClasses.map(cls => (
-                        <div 
-                          key={cls.id} 
-                          onClick={() => onClassClick(cls.id)}
-                          className="p-3 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md hover:theme-border transition-all cursor-pointer group"
-                        >
-                          <div className="w-4 h-1 rounded-full mb-2" style={{ backgroundColor: cls.themeColor }} />
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{cls.classTime}</p>
-                          <p className="text-[10px] font-black text-slate-800 group-hover:theme-primary truncate">{cls.name}</p>
-                        </div>
-                      ))}
-                      {dayTasks.map(task => (
-                        <div 
-                          key={task.id} 
-                          onClick={onTaskClick}
-                          className="p-3 rounded-2xl bg-amber-50 border border-amber-100 shadow-sm hover:border-amber-400 transition-all cursor-pointer"
-                        >
-                          <p className="text-[7px] font-black text-amber-600 uppercase tracking-widest mb-1">Due</p>
-                          <p className="text-[10px] font-bold text-slate-800 truncate">{task.name}</p>
-                        </div>
-                      ))}
-                    </div>
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
+               {/* Header Row */}
+               <div className="flex border-b border-slate-100 bg-slate-50/50">
+                  <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center flex flex-col justify-center">
+                     <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Time</span>
                   </div>
-                );
-              })}
+                  {currentWeekDates.map((date, idx) => {
+                    const isToday = date.toDateString() === today.toDateString();
+                    return (
+                      <div key={idx} className={`flex-1 p-4 text-center border-r border-slate-100 last:border-r-0 ${isToday ? 'theme-light-bg' : ''}`}>
+                        <p className={`text-[9px] font-black uppercase tracking-widest mb-0.5 ${isToday ? 'theme-primary' : 'text-slate-400'}`}>
+                          {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                        </p>
+                        <p className={`text-lg font-black ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{date.getDate()}</p>
+                      </div>
+                    );
+                  })}
+               </div>
+               
+               {/* Body Grid */}
+               <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+                  {HOURS.map(hour => (
+                    <div key={hour} className="flex min-h-[80px] border-b border-slate-50 last:border-b-0">
+                       <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center">
+                          <span className="text-[10px] font-black text-slate-400">{hour.toString().padStart(2, '0')}:00</span>
+                       </div>
+                       {currentWeekDates.map((date, dayIdx) => {
+                          const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
+                          const hourClasses = dayClasses.filter(c => parseInt(c.classTime.split(':')[0]) === hour);
+                          return (
+                            <div key={dayIdx} className="flex-1 p-1 flex flex-col gap-1 border-r border-slate-50 last:border-r-0 relative">
+                               {hourClasses.map(cls => (
+                                 <div 
+                                   key={cls.id} 
+                                   onClick={() => onClassClick(cls.id)}
+                                   className="p-2 rounded-xl text-white shadow-sm hover:brightness-95 transition-all cursor-pointer group h-full flex flex-col justify-center"
+                                   style={{ backgroundColor: cls.themeColor }}
+                                 >
+                                    <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
+                                    <p className="text-[9px] font-black leading-tight line-clamp-2">{cls.name}</p>
+                                 </div>
+                               ))}
+                               {hour === 9 && isHoliday && (
+                                  <div className="absolute inset-x-1 top-1 p-2 rounded-xl bg-red-50 border border-red-100 z-10" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
+                                     <p className="text-[7px] font-black text-red-600 uppercase">Holiday</p>
+                                     <p className="text-[8px] font-bold text-red-800 truncate">{isHoliday.description}</p>
+                                  </div>
+                               )}
+                            </div>
+                          );
+                       })}
+                    </div>
+                  ))}
+               </div>
             </div>
           ) : (
             <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm h-full flex flex-col">
@@ -197,15 +219,6 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                             style={{ backgroundColor: c.themeColor }}
                           >
                             {c.name}
-                          </div>
-                        ))}
-                        {dayTasks.map(t => (
-                          <div 
-                            key={t.id} 
-                            onClick={() => setSelectedEvent({ type: 'TASK', ...t })} 
-                            className="bg-amber-400 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black truncate cursor-pointer hover:brightness-90"
-                          >
-                            {t.name}
                           </div>
                         ))}
                       </div>

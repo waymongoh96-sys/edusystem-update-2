@@ -1,10 +1,10 @@
 
-import React, { useState } from 'react';
-import { Plus, Clock, Calendar, Users, X, BookOpen, ChevronRight, CheckCircle2, Edit2, Trash2, Palette } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Plus, Clock, Calendar, Users, X, BookOpen, ChevronRight, CheckCircle2, Edit2, Trash2, Palette, GripVertical } from 'lucide-react';
 import { Class, SystemSettings, LessonPlan, TaskStatus } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 interface ClassRegistryProps {
   classes: Class[];
@@ -19,9 +19,14 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
   const [showQuickPlan, setShowQuickPlan] = useState(false);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '', themeColor: '#3b82f6', classDay: 'Monday', classTime: '09:00'
   });
+
+  const sortedClasses = useMemo(() => {
+    return [...classes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [classes]);
 
   const getNextDateForDay = (dayName: string) => {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -99,7 +104,8 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
       id: classId,
       ...formData,
       teacherId: 't1', 
-      enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : []
+      enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : [],
+      order: editingClass?.order ?? classes.length
     };
     
     try {
@@ -110,6 +116,39 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
       console.error("Save failed:", err);
       alert("Failed to save data. Please check your Firestore Security Rules.");
     }
+  };
+
+  const handleDragStart = (id: string) => {
+    setDraggedId(id);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+
+    const oldIndex = sortedClasses.findIndex(c => c.id === draggedId);
+    const newIndex = sortedClasses.findIndex(c => c.id === targetId);
+
+    const reordered = [...sortedClasses];
+    const [removed] = reordered.splice(oldIndex, 1);
+    reordered.splice(newIndex, 0, removed);
+
+    // Persist new order to Firestore using batch
+    const batch = writeBatch(db);
+    reordered.forEach((cls, idx) => {
+      const ref = doc(db, 'classes', cls.id);
+      batch.update(ref, { order: idx });
+    });
+    
+    try {
+      await batch.commit();
+    } catch (err) {
+      console.error("Batch update failed:", err);
+    }
+    setDraggedId(null);
   };
 
   return (
@@ -125,30 +164,51 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {classes.map(cls => (
-          <div key={cls.id} onClick={() => onSelectClass(cls.id)} className="bg-white rounded-[2.5rem] p-8 border border-slate-200 hover:theme-border hover:shadow-2xl hover:-translate-y-1 transition-all cursor-pointer group relative overflow-hidden">
-            <div className="w-2 h-16 absolute left-0 top-1/2 -translate-y-1/2 rounded-r-xl" style={{ backgroundColor: cls.themeColor }} />
-            <div className="flex justify-between items-start mb-6">
-               <div className="flex-1 min-w-0">
-                 <h3 className="text-2xl font-black text-slate-800 group-hover:theme-primary transition-colors truncate">{cls.name}</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {sortedClasses.map(cls => (
+          <div 
+            key={cls.id} 
+            draggable
+            onDragStart={() => handleDragStart(cls.id)}
+            onDragOver={handleDragOver}
+            onDrop={() => handleDrop(cls.id)}
+            onClick={() => onSelectClass(cls.id)} 
+            className={`bg-white rounded-[2rem] p-6 border border-slate-200 hover:theme-border hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group relative overflow-hidden flex flex-col h-full min-h-[220px] ${draggedId === cls.id ? 'opacity-40 grayscale scale-95' : 'opacity-100'}`}
+          >
+            <div className="w-1.5 h-12 absolute left-0 top-8 rounded-r-lg" style={{ backgroundColor: cls.themeColor }} />
+            
+            <div className="flex justify-between items-start mb-4 gap-2">
+               <div className="flex-1">
+                 <h3 className="text-xl font-black text-slate-800 group-hover:theme-primary transition-colors leading-tight break-words pr-4">{cls.name}</h3>
                </div>
-               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity ml-4">
-                  <button onClick={(e) => handleOpenEdit(e, cls)} className="p-3 bg-slate-50 text-slate-400 hover:theme-primary rounded-xl transition-all shadow-sm">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button onClick={(e) => handleDeleteClass(e, cls.id)} className="p-3 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl transition-all shadow-sm">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+               <div className="flex flex-col gap-2 shrink-0">
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    <button onClick={(e) => handleOpenEdit(e, cls)} className="p-2 bg-slate-50 text-slate-400 hover:theme-primary rounded-lg transition-all shadow-sm">
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={(e) => handleDeleteClass(e, cls.id)} className="p-2 bg-slate-50 text-slate-400 hover:text-red-500 rounded-lg transition-all shadow-sm">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex justify-end opacity-20 group-hover:opacity-40 transition-opacity">
+                    <GripVertical className="w-4 h-4 text-slate-600" />
+                  </div>
                </div>
             </div>
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 text-slate-500"><div className="p-2.5 bg-slate-50 rounded-xl group-hover:theme-light-bg group-hover:theme-primary transition-all"><Calendar className="w-4 h-4" /></div><span className="text-xs font-black uppercase tracking-widest">Every {cls.classDay}</span></div>
-              <div className="flex items-center gap-4 text-slate-500"><div className="p-2.5 bg-slate-50 rounded-xl group-hover:theme-light-bg group-hover:theme-primary transition-all"><Clock className="w-4 h-4" /></div><span className="text-xs font-black uppercase tracking-widest">{cls.classTime}</span></div>
-              <div className="flex items-center gap-4 text-slate-500"><div className="p-2.5 bg-slate-50 rounded-xl group-hover:theme-light-bg group-hover:theme-primary transition-all"><Users className="w-4 h-4" /></div><span className="text-xs font-black uppercase tracking-widest">{cls.enrolledStudentIds?.length || 0} Registered</span></div>
+
+            <div className="mt-auto space-y-3">
+              <div className="flex items-center gap-3 text-slate-500"><Calendar className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">Every {cls.classDay}</span></div>
+              <div className="flex items-center gap-3 text-slate-500"><Clock className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">{cls.classTime}</span></div>
+              <div className="flex items-center gap-3 text-slate-500"><Users className="w-3.5 h-3.5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">{cls.enrolledStudentIds?.length || 0} Nodes</span></div>
             </div>
           </div>
         ))}
+        {sortedClasses.length === 0 && (
+          <div className="col-span-full py-20 bg-white border-2 border-dashed border-slate-100 rounded-[3rem] flex flex-col items-center justify-center text-slate-400">
+             <BookOpen className="w-12 h-12 mb-4 opacity-20" />
+             <p className="font-black uppercase tracking-widest text-xs">Registry Empty</p>
+          </div>
+        )}
       </div>
 
       {showQuickPlan && (

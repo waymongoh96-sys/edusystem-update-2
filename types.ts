@@ -44,6 +44,7 @@ export interface Class {
   classTime: string;
   teacherId: string;
   enrolledStudentIds: string[];
+  order?: number;
 }
 
 export interface LessonPlan {

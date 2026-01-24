@@ -1,8 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { User, UserStatus, Role, Class } from '../types';
-// Added Users to the lucide-react imports
-import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users } from 'lucide-react';
+import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users, Edit, Filter } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
@@ -15,8 +14,10 @@ interface AdminViewProps {
 const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) => {
   const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [isBulkImporting, setIsBulkImporting] = useState(false);
   const [bulkData, setBulkData] = useState('');
+  const [teacherFilter, setTeacherFilter] = useState('ALL');
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
@@ -29,7 +30,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = Date.now().toString();
+    const id = editingUserId || Date.now().toString();
     const newUser: User = {
       ...formData as User,
       id,
@@ -40,7 +41,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     await setDoc(doc(db, collectionName, id), newUser);
     
     setIsAdding(false);
+    setEditingUserId(null);
     setFormData({ name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1' });
+  };
+
+  const handleEdit = (user: User) => {
+    setEditingUserId(user.id);
+    setFormData(user);
+    setIsAdding(true);
   };
 
   const handleBulkImport = async () => {
@@ -63,7 +71,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           id,
           name,
           username,
-          password: 'password123', // Default password
+          password: 'password123',
           role: 'STUDENT',
           status: UserStatus.ACTIVE,
           age,
@@ -92,7 +100,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     }
   };
 
-  const currentList = activeTab === 'TEACHER' ? teachers : students;
+  const filteredStudents = useMemo(() => {
+    if (teacherFilter === 'ALL') return students;
+    const teacherClasses = classes.filter(c => c.teacherId === teacherFilter);
+    const studentIds = new Set(teacherClasses.flatMap(c => c.enrolledStudentIds));
+    return students.filter(s => studentIds.has(s.id));
+  }, [students, classes, teacherFilter]);
+
+  const currentList = activeTab === 'TEACHER' ? teachers : filteredStudents;
 
   return (
     <div className="space-y-10">
@@ -147,7 +162,11 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
             </button>
           )}
           <button 
-            onClick={() => setIsAdding(true)}
+            onClick={() => {
+              setEditingUserId(null);
+              setFormData({ name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1' });
+              setIsAdding(true);
+            }}
             className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"
           >
             <Plus className="w-5 h-5" />
@@ -156,21 +175,37 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
-        <button 
-          onClick={() => setActiveTab('TEACHER')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
-        >
-          <Briefcase className="w-4 h-4" />
-          Teachers
-        </button>
-        <button 
-          onClick={() => setActiveTab('STUDENT')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'STUDENT' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          Students
-        </button>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
+          <button 
+            onClick={() => setActiveTab('TEACHER')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Briefcase className="w-4 h-4" />
+            Teachers
+          </button>
+          <button 
+            onClick={() => setActiveTab('STUDENT')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'STUDENT' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <GraduationCap className="w-4 h-4" />
+            Students
+          </button>
+        </div>
+
+        {activeTab === 'STUDENT' && (
+          <div className="flex items-center gap-3 bg-white border border-slate-200 px-4 py-2 rounded-2xl shadow-sm">
+             <Filter className="w-4 h-4 text-slate-400" />
+             <select 
+               className="bg-transparent border-none font-bold text-xs text-slate-600 outline-none"
+               value={teacherFilter}
+               onChange={(e) => setTeacherFilter(e.target.value)}
+             >
+                <option value="ALL">Filter by Staff (All)</option>
+                {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+             </select>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -218,16 +253,21 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                     </td>
                   )}
                   <td className="px-8 py-5 text-right">
-                    <button onClick={() => handleDelete(user)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                      <button onClick={() => handleEdit(user)} className="p-2 text-slate-400 hover:theme-primary hover:bg-slate-50 rounded-lg transition-all">
+                        <Edit className="w-5 h-5" />
+                      </button>
+                      <button onClick={() => handleDelete(user)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {currentList.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-8 py-20 text-center">
-                    <p className="text-slate-400 italic">No {activeTab.toLowerCase()}s registered in the system yet.</p>
+                    <p className="text-slate-400 italic">No nodes found matching current filters.</p>
                   </td>
                 </tr>
               )}
@@ -240,7 +280,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-8">
-              <h2 className="text-2xl font-black text-slate-800">New Account</h2>
+              <h2 className="text-2xl font-black text-slate-800">{editingUserId ? 'Edit Account' : 'New Account'}</h2>
               <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
             <form onSubmit={handleSave} className="space-y-5">
@@ -268,7 +308,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Password</label>
                   <input 
-                    required
+                    required={!editingUserId}
                     type="password"
                     placeholder="••••••••"
                     className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
@@ -314,7 +354,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                 type="submit"
                 className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-100 mt-6 transition-all active:scale-95"
               >
-                Create Account
+                {editingUserId ? 'Update Details' : 'Create Account'}
               </button>
             </form>
           </div>
