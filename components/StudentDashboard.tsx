@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   GraduationCap, BookOpen, Calendar, Clock, TrendingUp, 
-  CheckCircle2, AlertCircle, ChevronLeft, BarChart3, Sparkles
+  CheckCircle2, AlertCircle, ChevronLeft, BarChart3, Sparkles, FileText
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, Class, AttendanceRecord, ExamResult, AttendanceStatus } from '../types';
@@ -42,7 +42,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
         <div className="bg-white border border-slate-200 px-6 py-4 rounded-3xl shadow-sm flex items-center gap-4">
            <div className="w-10 h-10 theme-light-bg rounded-xl flex items-center justify-center"><BookOpen className="w-5 h-5 theme-primary" /></div>
-           <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Enrolled Labs</p><p className="text-sm font-black text-slate-800">{enrolledClasses.length} Nodes</p></div>
+           <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Enrolled Labs</p><p className="text-sm font-black text-slate-800">{enrolledClasses.length} Classes</p></div>
         </div>
       </div>
 
@@ -92,7 +92,7 @@ const StudentClassView: React.FC<{
     const presentCount = monthAtt.filter(a => a.status === AttendanceStatus.PRESENT).length;
     const attPercent = monthAtt.length > 0 ? (presentCount / monthAtt.length) * 100 : 0;
     const avgScore = examResults.length > 0 ? examResults.reduce((acc, curr) => acc + curr.score, 0) / examResults.length : 0;
-    const latestExam = examResults.length > 0 ? examResults.sort((a,b) => b.id.localeCompare(a.id))[0] : null;
+    const latestExam = examResults.length > 0 ? [...examResults].sort((a,b) => b.id.localeCompare(a.id))[0] : null;
     return { attPercent, avgScore, latestExam };
   }, [attendance, examResults, selectedMonth]);
 
@@ -100,16 +100,16 @@ const StudentClassView: React.FC<{
     setIsGenerating(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const notes = attendance.map(a => `${a.date}: ${a.performanceComment}`).filter(n => n.length > 15).join('\n');
+      const notes = attendance.map(a => `${a.date}: ${a.performanceComment}`).filter(n => n.length > 10).join('\n');
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Act as a supportive academic mentor. Based on these teacher notes for ${student.name} in ${cls.name}, provide a supportive 2-sentence summary of their performance and one encouraging tip for the next month. 
-        Notes:
-        ${notes || "No specific notes recorded yet, but they have been attending regularly."}`,
+        contents: `Act as a supportive academic mentor. Based on these teacher notes for student ${student.name} in class ${cls.name}, provide a supportive 2-sentence summary of their performance and one encouraging tip for next month. 
+        Teacher's Notes:
+        ${notes || "The student has been attending class regularly and participating well."}`,
       });
       setAiAnalysis(response.text);
     } catch (e) {
-      setAiAnalysis("Your performance has been consistent. Keep up the great work in class!");
+      setAiAnalysis("You are showing great consistency in your learning path. Focus on maintaining this momentum!");
     } finally {
       setIsGenerating(false);
     }
@@ -119,7 +119,7 @@ const StudentClassView: React.FC<{
     <div className="space-y-10 animate-in fade-in zoom-in-95 duration-500 pb-20">
       <div className="flex items-center gap-6">
         <button onClick={onBack} className="p-4 bg-white border border-slate-200 hover:bg-slate-50 rounded-3xl shadow-sm transition-all group active:scale-95"><ChevronLeft className="w-6 h-6 text-slate-600 group-hover:theme-primary" /></button>
-        <div><h1 className="text-4xl font-black text-slate-800">{cls.name} Analysis</h1><p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">Personal Progress Node</p></div>
+        <div><h1 className="text-4xl font-black text-slate-800">{cls.name} Analysis</h1><p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">Personal Progress Terminal</p></div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -130,36 +130,36 @@ const StudentClassView: React.FC<{
                 {Array.from({length: 12}).map((_, i) => <option key={i} value={i}>{new Date(0, i).toLocaleString('default', {month: 'long'})}</option>)}
               </select>
            </div>
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Attendance Health</p>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monthly Attendance</p>
            <h4 className="text-4xl font-black text-slate-800">{stats.attPercent.toFixed(1)}%</h4>
            <div className="w-full h-2 bg-slate-50 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${stats.attPercent}%` }} /></div>
         </div>
 
         <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
            <div className="p-3 theme-light-bg rounded-2xl w-fit"><TrendingUp className="w-6 h-6 theme-primary" /></div>
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Academic Mean</p>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Average Exam Score</p>
            <h4 className="text-4xl font-black text-slate-800">{stats.avgScore.toFixed(1)}%</h4>
-           <p className="text-[10px] font-bold text-slate-500 uppercase">Average based on all recorded exams</p>
+           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cumulative GPA across terms</p>
         </div>
 
         <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
            <div className="p-3 bg-amber-50 rounded-2xl w-fit"><BarChart3 className="w-6 h-6 text-amber-500" /></div>
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Latest Outcome</p>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Latest Exam Outcome</p>
            <h4 className="text-4xl font-black text-slate-800">{stats.latestExam?.score || 0}%</h4>
-           <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest truncate">{stats.latestExam?.examName || 'No Records Found'}</p>
+           <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest truncate">{stats.latestExam?.examName || 'No Exams Logged'}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
-           <h3 className="text-2xl font-black text-slate-800 mb-10 flex items-center gap-4"><Calendar className="w-8 h-8 theme-primary" /> Engagement Log</h3>
+           <h3 className="text-2xl font-black text-slate-800 mb-10 flex items-center gap-4"><FileText className="w-8 h-8 theme-primary" /> Attendance & Metric Log</h3>
            <div className="flex-1 overflow-x-auto custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[600px]">
                 <thead className="sticky top-0 bg-slate-50 z-10">
                   <tr className="border-b border-slate-200">
-                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Timestamp</th>
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
-                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Diagnostic Comments</th>
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Metric</th>
                   </tr>
                 </thead>
@@ -173,10 +173,17 @@ const StudentClassView: React.FC<{
                           record.status === AttendanceStatus.ABSENT ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
                         }`}>{record.status}</span>
                       </td>
-                      <td className="px-6 py-6 text-xs text-slate-500 font-medium leading-relaxed italic">"{record.performanceComment || 'Standard operational progression.'}"</td>
-                      <td className="px-6 py-6 text-right font-black text-slate-800 text-sm">{record.testScore ? `${record.testScore}` : '--'}</td>
+                      <td className="px-6 py-6 text-xs text-slate-500 font-medium leading-relaxed italic">"{record.performanceComment || 'Steady progress maintained.'}"</td>
+                      <td className="px-6 py-6 text-right font-black text-slate-800 text-sm">{record.testScore ? `${record.testScore}%` : '--'}</td>
                     </tr>
                   ))}
+                  {attendance.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
+                        No activity records found for this registry.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
            </div>
@@ -185,28 +192,28 @@ const StudentClassView: React.FC<{
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px] relative overflow-hidden">
            <div className="flex items-center gap-4 mb-10">
               <div className="p-4 theme-light-bg rounded-3xl"><Sparkles className="w-8 h-8 theme-primary" /></div>
-              <div><h3 className="text-2xl font-black text-slate-800">Insight Lab</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Personal Performance AI</p></div>
+              <div><h3 className="text-2xl font-black text-slate-800">Support Terminal</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Mentor Analysis</p></div>
            </div>
            
-           <div className="flex-1 bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 relative group">
+           <div className="flex-1 bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 relative group overflow-y-auto custom-scrollbar">
               {isGenerating ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-4">
                   <div className="w-12 h-12 theme-bg rounded-full animate-ping opacity-20" />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Synthesizing Progress...</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Synthesizing Data...</p>
                 </div>
               ) : aiAnalysis ? (
                 <div className="space-y-6">
-                  <p className="text-base font-black text-slate-700 leading-relaxed">"{aiAnalysis}"</p>
+                  <p className="text-base font-bold text-slate-700 leading-relaxed whitespace-pre-wrap">"{aiAnalysis}"</p>
                   <div className="pt-6 border-t border-slate-200">
-                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Mentor Tip</p>
-                     <p className="text-xs font-bold text-slate-500 mt-2">Consistency in daily reviews will compound your growth for the final exams.</p>
+                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Growth Tip</p>
+                     <p className="text-xs font-bold text-slate-500 mt-2">Active participation in classroom discussions often leads to better comprehension of complex topics.</p>
                   </div>
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center space-y-6 px-4">
                    <AlertCircle className="w-12 h-12 text-slate-200" />
-                   <p className="text-sm font-bold text-slate-400 leading-relaxed uppercase tracking-widest">Generate a summary of teacher feedback and AI-driven growth tips.</p>
-                   <button onClick={generateAIComment} className="theme-bg text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-500/10 active:scale-95 transition-all">Generate Summary</button>
+                   <p className="text-sm font-bold text-slate-400 leading-relaxed uppercase tracking-widest">Request a synthesis of teacher insights and personalized growth strategies.</p>
+                   <button onClick={generateAIComment} className="theme-bg text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-500/10 active:scale-95 transition-all">Analyze Performance</button>
                 </div>
               )}
            </div>

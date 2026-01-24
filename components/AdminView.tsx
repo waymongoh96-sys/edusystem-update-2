@@ -23,11 +23,21 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   });
 
   const stats = useMemo(() => {
+    // If a teacher is selected, only show their specific data
     const filteredClasses = teacherFilter === 'ALL' ? classes : classes.filter(c => c.teacherId === teacherFilter);
     const totalClasses = filteredClasses.length;
-    const totalStudentsTaught = filteredClasses.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
-    const uniqueStudents = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds)).size;
-    return { totalClasses, totalStudentsTaught, uniqueStudents };
+    
+    // Sum of all student spots filled across all filtered classes
+    const totalEnrollments = filteredClasses.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
+    
+    // Count of distinct student IDs across all filtered classes
+    const uniqueStudentIds = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds || []));
+    
+    return { 
+      totalClasses, 
+      totalEnrollments, 
+      uniqueCount: uniqueStudentIds.size 
+    };
   }, [classes, teacherFilter]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -102,79 +112,90 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     }
   };
 
-  const filteredStudents = useMemo(() => {
+  // The list filter should probably reflect the teacher filter when on Students tab
+  const currentList = useMemo(() => {
+    if (activeTab === 'TEACHER') return teachers;
     if (teacherFilter === 'ALL') return students;
+    
     const teacherClasses = classes.filter(c => c.teacherId === teacherFilter);
-    const studentIds = new Set(teacherClasses.flatMap(c => c.enrolledStudentIds));
+    const studentIds = new Set(teacherClasses.flatMap(c => c.enrolledStudentIds || []));
     return students.filter(s => studentIds.has(s.id));
-  }, [students, classes, teacherFilter]);
-
-  const currentList = activeTab === 'TEACHER' ? teachers : filteredStudents;
+  }, [activeTab, teachers, students, teacherFilter, classes]);
 
   return (
     <div className="space-y-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Admin Dashboard</h1>
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Institutional Hub</p>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Institutional Terminal</h1>
+          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Admin Operations</p>
         </div>
         
         <div className="flex items-center gap-4 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm">
            <Filter className="w-5 h-5 text-slate-400" />
            <div className="flex flex-col">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Filter Stats by Teacher</span>
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Perspective Filter</span>
               <select 
-                className="bg-transparent border-none font-black text-xs text-slate-700 outline-none"
+                className="bg-transparent border-none font-black text-xs text-slate-700 outline-none pr-8"
                 value={teacherFilter}
                 onChange={(e) => setTeacherFilter(e.target.value)}
               >
-                 <option value="ALL">All Teachers (Global Overview)</option>
+                 <option value="ALL">All Staff (Institutional Scope)</option>
                  {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
            </div>
         </div>
       </div>
 
-      {/* Global Stats Dashboard */}
+      {/* Dynamic Stats Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 theme-light-bg rounded-2xl mb-4 group-hover:scale-110 transition-transform">
             <BookOpen className="w-8 h-8 theme-primary" />
           </div>
           <h4 className="text-3xl font-black text-slate-800">{stats.totalClasses}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Classrooms</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Managed Classes</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-purple-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
             <Users className="w-8 h-8 text-purple-600" />
           </div>
-          <h4 className="text-3xl font-black text-slate-800">{stats.totalStudentsTaught}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Enrolled Students</p>
+          <h4 className="text-3xl font-black text-slate-800">{stats.totalEnrollments}</h4>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Student Enrollments</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-emerald-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
             <Briefcase className="w-8 h-8 text-emerald-600" />
           </div>
           <h4 className="text-3xl font-black text-slate-800">{teacherFilter === 'ALL' ? teachers.length : '1'}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Staff Count</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Active Staff Members</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-blue-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
             <GraduationCap className="w-8 h-8 text-blue-600" />
           </div>
-          <h4 className="text-3xl font-black text-slate-800">{stats.uniqueStudents}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Unique Students</p>
+          <h4 className="text-3xl font-black text-slate-800">{stats.uniqueCount}</h4>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Unique Student Profiles</p>
         </div>
       </div>
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-slate-100 pt-10">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Shield className="w-6 h-6 text-purple-600" />
-            Central User Registry
-          </h1>
-          <p className="text-slate-500">Master database for all educational stakeholders.</p>
+        <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
+          <button 
+            onClick={() => setActiveTab('TEACHER')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Briefcase className="w-4 h-4" />
+            Teachers
+          </button>
+          <button 
+            onClick={() => setActiveTab('STUDENT')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'STUDENT' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <GraduationCap className="w-4 h-4" />
+            Students
+          </button>
         </div>
+        
         <div className="flex gap-3">
           {activeTab === 'STUDENT' && (
             <button 
@@ -194,26 +215,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
             className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"
           >
             <Plus className="w-5 h-5" />
-            Register New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
-          <button 
-            onClick={() => setActiveTab('TEACHER')}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <Briefcase className="w-4 h-4" />
-            Teachers
-          </button>
-          <button 
-            onClick={() => setActiveTab('STUDENT')}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'STUDENT' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <GraduationCap className="w-4 h-4" />
-            Students
+            New {activeTab === 'TEACHER' ? 'Staff' : 'Student'} Account
           </button>
         </div>
       </div>
@@ -223,12 +225,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <table className="w-full text-left">
             <thead className="bg-slate-50/50 border-b border-slate-200">
               <tr>
-                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Full Name</th>
-                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Credentials</th>
+                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Stakeholder</th>
+                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Access Node</th>
                 <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Status</th>
                 {activeTab === 'STUDENT' && (
                   <>
-                    <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Info</th>
+                    <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Academic Level</th>
                   </>
                 )}
                 <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider text-right">Actions</th>
@@ -247,7 +249,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                   </td>
                   <td className="px-8 py-5">
                     <p className="text-sm font-medium text-slate-600">@{user.username}</p>
-                    <p className="text-xs text-slate-400">••••••••</p>
                   </td>
                   <td className="px-8 py-5">
                     <span className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase border ${
@@ -258,7 +259,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                   </td>
                   {activeTab === 'STUDENT' && (
                     <td className="px-8 py-5">
-                      <p className="text-sm font-semibold text-slate-700">Standard {user.standard}</p>
+                      <p className="text-sm font-semibold text-slate-700">Form {user.standard}</p>
                       <p className="text-xs text-slate-500">{user.age} Years Old</p>
                     </td>
                   )}
@@ -277,7 +278,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
               {currentList.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-8 py-20 text-center">
-                    <p className="text-slate-400 italic">No students found matching current filters.</p>
+                    <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No accounts found in this registry scope.</p>
                   </td>
                 </tr>
               )}
@@ -290,38 +291,38 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-8">
-              <h2 className="text-2xl font-black text-slate-800">{editingUserId ? 'Edit Account' : 'New Account'}</h2>
+              <h2 className="text-2xl font-black text-slate-800">{editingUserId ? 'Modify Account' : 'Initialize Account'}</h2>
               <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
             <form onSubmit={handleSave} className="space-y-5">
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Full Name</label>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Legal Name</label>
                 <input 
                   required
                   placeholder="e.g. John Doe"
-                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-purple-100 outline-none transition-all font-medium"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-purple-100 outline-none transition-all font-medium"
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Username</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Username</label>
                   <input 
                     required
                     placeholder="jdoe"
-                    className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
                     value={formData.username}
                     onChange={e => setFormData({...formData, username: e.target.value})}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Password</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Access Token</label>
                   <input 
                     required={!editingUserId}
                     type="password"
                     placeholder="••••••••"
-                    className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
                     value={formData.password}
                     onChange={e => setFormData({...formData, password: e.target.value})}
                   />
@@ -330,19 +331,19 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
               {activeTab === 'STUDENT' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Age</label>
+                    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Age Metric</label>
                     <input 
                       type="number"
-                      className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
                       value={formData.age}
                       onChange={e => setFormData({...formData, age: parseInt(e.target.value)})}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Standard</label>
+                    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Form/Standard</label>
                     <input 
                       placeholder="e.g. 4A"
-                      className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium"
                       value={formData.standard}
                       onChange={e => setFormData({...formData, standard: e.target.value})}
                     />
@@ -350,71 +351,23 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                 </div>
               )}
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Status</label>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Employment Status</label>
                 <select 
-                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700"
                   value={formData.status}
                   onChange={e => setFormData({...formData, status: e.target.value as UserStatus})}
                 >
                   <option value={UserStatus.ACTIVE}>Active Enrollment</option>
-                  <option value={UserStatus.RESIGNED}>Inactive / Resigned</option>
+                  <option value={UserStatus.RESIGNED}>Inactive / Discharged</option>
                 </select>
               </div>
               <button 
                 type="submit"
-                className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-100 mt-6 transition-all active:scale-95"
+                className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 shadow-xl mt-6 transition-all active:scale-95"
               >
-                {editingUserId ? 'Update Details' : 'Create Account'}
+                {editingUserId ? 'Commit Changes' : 'Initialize Account'}
               </button>
             </form>
-          </div>
-        </div>
-      )}
-
-      {isBulkImporting && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-xl w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-2xl font-black text-slate-800">Bulk Student Import</h2>
-                <p className="text-sm text-slate-400 font-bold uppercase tracking-widest mt-1">Student Account Provisioning</p>
-              </div>
-              <button onClick={() => setIsBulkImporting(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
-            </div>
-            
-            <div className="space-y-6">
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Instructions</p>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Enter one student per line in the following format:<br/>
-                  <code className="bg-slate-200 px-2 py-0.5 rounded font-mono text-purple-700 font-bold">Name, Username, Age, Standard</code><br/><br/>
-                  Example:<br/>
-                  <code className="text-slate-400 font-mono">Alice Smith, alice, 10, 4A<br/>Bob Jones, bob, 11, 5B</code>
-                </p>
-              </div>
-
-              <textarea 
-                className="w-full h-64 p-6 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-mono text-sm focus:ring-4 focus:ring-purple-100 transition-all"
-                placeholder="Alice Smith, alice, 10, 4A..."
-                value={bulkData}
-                onChange={(e) => setBulkData(e.target.value)}
-              />
-
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => setIsBulkImporting(false)}
-                  className="flex-1 py-4 bg-slate-100 text-slate-500 font-black uppercase text-xs tracking-widest rounded-xl"
-                >
-                  Discard
-                </button>
-                <button 
-                  onClick={handleBulkImport}
-                  className="flex-2 py-4 bg-purple-600 text-white font-black uppercase text-xs tracking-widest rounded-xl shadow-lg shadow-purple-100 hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
-                >
-                  <Upload className="w-4 h-4" /> Initialize Registry
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

@@ -19,7 +19,7 @@ import StudentDashboard from './components/StudentDashboard';
 import Login from './components/Login';
 
 // Firebase Imports
-import { onSnapshot, collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { onSnapshot, collection, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 
@@ -48,22 +48,45 @@ const App: React.FC = () => {
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
 
-  // Sync Auth
+  // Sync Auth and Role Detection
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = firebaseUser.email || '';
-        let role: Role = 'TEACHER';
-        if (email.toLowerCase().includes('admin')) role = 'ADMIN';
-        if (email.toLowerCase().includes('student')) role = 'STUDENT';
-
-        setCurrentUser({
+        let detectedRole: Role = 'TEACHER';
+        let userData: Partial<User> = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || email.split('@')[0],
           username: email.split('@')[0],
-          role: role,
           status: UserStatus.ACTIVE
-        });
+        };
+
+        // Priority check for Admin
+        if (email.toLowerCase().includes('admin')) {
+          detectedRole = 'ADMIN';
+        } else {
+          // Check Students Collection
+          const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
+          if (studentDoc.exists()) {
+            detectedRole = 'STUDENT';
+            userData = { ...userData, ...studentDoc.data() };
+          } else {
+            // Check Teachers Collection
+            const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
+            if (teacherDoc.exists()) {
+              detectedRole = 'TEACHER';
+              userData = { ...userData, ...teacherDoc.data() };
+            } else if (email.toLowerCase().includes('student')) {
+              // Fallback for legacy email-based detection if not in collection yet
+              detectedRole = 'STUDENT';
+            }
+          }
+        }
+
+        setCurrentUser({
+          ...userData,
+          role: detectedRole
+        } as User);
       } else {
         setCurrentUser(null);
       }
@@ -281,7 +304,7 @@ const App: React.FC = () => {
 };
 
 const menuItems = {
-  ADMIN: [{ id: 'registry', icon: Users, label: 'User Registry' }],
+  ADMIN: [{ id: 'dashboard', icon: LayoutDashboard, label: 'Admin Hub' }],
   TEACHER: [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { id: 'classes', icon: BookOpen, label: 'Class Registry' },
