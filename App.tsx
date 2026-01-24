@@ -8,7 +8,7 @@ import {
   Role, User, Class, LessonPlan, Task, AttendanceRecord, SystemSettings, 
   TaskStatus, UserStatus, ExamResult 
 } from './types';
-import { MOCK_STUDENTS, MOCK_TEACHERS, INITIAL_SETTINGS } from './constants';
+import { INITIAL_SETTINGS } from './constants';
 import AdminView from './components/AdminView';
 import TeacherDashboard from './components/TeacherDashboard';
 import ClassRegistry from './components/ClassRegistry';
@@ -53,7 +53,7 @@ const App: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = firebaseUser.email || '';
-        let detectedRole: Role = 'TEACHER';
+        let detectedRole: Role | null = null;
         let userData: Partial<User> = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || email.split('@')[0],
@@ -61,32 +61,34 @@ const App: React.FC = () => {
           status: UserStatus.ACTIVE
         };
 
-        // Priority check for Admin
+        // 1. Admin check
         if (email.toLowerCase().includes('admin')) {
           detectedRole = 'ADMIN';
         } else {
-          // Check Students Collection
-          const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
-          if (studentDoc.exists()) {
-            detectedRole = 'STUDENT';
-            userData = { ...userData, ...studentDoc.data() };
+          // 2. Teacher check
+          const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
+          if (teacherDoc.exists()) {
+            detectedRole = 'TEACHER';
+            userData = { ...userData, ...teacherDoc.data() };
           } else {
-            // Check Teachers Collection
-            const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
-            if (teacherDoc.exists()) {
-              detectedRole = 'TEACHER';
-              userData = { ...userData, ...teacherDoc.data() };
-            } else if (email.toLowerCase().includes('student')) {
-              // Fallback for legacy email-based detection if not in collection yet
+            // 3. Student check
+            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
+            if (studentDoc.exists()) {
               detectedRole = 'STUDENT';
+              userData = { ...userData, ...studentDoc.data() };
             }
           }
         }
 
-        setCurrentUser({
-          ...userData,
-          role: detectedRole
-        } as User);
+        if (detectedRole) {
+          setCurrentUser({
+            ...userData,
+            role: detectedRole
+          } as User);
+        } else {
+          // If logged in but no role found in collections, force logout or show error
+          setCurrentUser(null);
+        }
       } else {
         setCurrentUser(null);
       }
@@ -129,22 +131,50 @@ const App: React.FC = () => {
     };
   }, [currentUser]);
 
-  // Priority Stream Task Generation
-  const allTasks = useMemo(() => {
-    const autoTasks: Task[] = lessonPlans
-      .filter(lp => lp.status !== TaskStatus.COMPLETE)
-      .map(lp => {
-        const cls = classes.find(c => c.id === lp.classId);
-        return {
-          id: `lp-${lp.classId}-${lp.id}`, 
-          name: `Prepare: ${cls?.name || 'Lesson'} (${lp.date})`,
-          dueDate: lp.date,
-          category: 'Preparation',
-          status: lp.status
-        };
-      });
-    return [...autoTasks, ...tasks];
-  }, [lessonPlans, tasks, classes]);
+  // Data Filtering Logic
+  const filteredData = useMemo(() => {
+    if (!currentUser) return null;
+
+    if (currentUser.role === 'TEACHER') {
+      const teacherClasses = classes.filter(c => c.teacherId === currentUser.id);
+      const teacherClassIds = new Set(teacherClasses.map(c => c.id));
+      
+      const teacherLessonPlans = lessonPlans.filter(lp => teacherClassIds.has(lp.classId));
+      
+      // Auto-tasks based on the teacher's lesson plans
+      const autoTasks: Task[] = teacherLessonPlans
+        .filter(lp => lp.status !== TaskStatus.COMPLETE)
+        .map(lp => {
+          const cls = teacherClasses.find(c => c.id === lp.classId);
+          return {
+            id: `lp-${lp.classId}-${lp.id}`, 
+            name: `Prepare: ${cls?.name || 'Lesson'} (${lp.date})`,
+            dueDate: lp.date,
+            category: 'Preparation',
+            status: lp.status
+          };
+        });
+
+      return {
+        classes: teacherClasses,
+        tasks: [...autoTasks, ...tasks.filter(t => !t.id.startsWith('lp-'))], // Filter tasks if we add teacherId to tasks later
+        lessonPlans: teacherLessonPlans,
+        attendance: attendance.filter(a => teacherClassIds.has(a.classId))
+      };
+    }
+
+    if (currentUser.role === 'STUDENT') {
+      const studentClasses = classes.filter(c => c.enrolledStudentIds?.includes(currentUser.id));
+      const classIds = new Set(studentClasses.map(c => c.id));
+      return {
+        classes: studentClasses,
+        attendance: attendance.filter(a => a.studentId === currentUser.id),
+        examResults: examResults.filter(e => e.studentId === currentUser.id)
+      };
+    }
+
+    return null; // Admin sees everything
+  }, [currentUser, classes, lessonPlans, tasks, attendance, examResults]);
 
   const primaryColor = useMemo(() => THEME_MAP[settings.themeColor] || THEME_MAP.blue, [settings.themeColor]);
 
@@ -157,7 +187,6 @@ const App: React.FC = () => {
     setActiveMenu('tasks');
   };
 
-  // Firestore Data Operations - Expose setters to components
   const deleteLessonPlan = async (id: string) => {
     await deleteDoc(doc(db, 'lessonPlans', id));
   };
@@ -173,28 +202,24 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     if (currentUser.role === 'ADMIN') {
-      return <AdminView 
-        teachers={teachers}
-        students={students}
-        classes={classes}
-      />;
+      return <AdminView teachers={teachers} students={students} classes={classes} />;
     }
 
-    if (currentUser.role === 'TEACHER') {
+    if (currentUser.role === 'TEACHER' && filteredData) {
       switch (activeMenu) {
         case 'dashboard':
           return <TeacherDashboard 
-            tasks={allTasks} classes={classes} 
-            lessonPlans={lessonPlans} settings={settings}
+            tasks={filteredData.tasks} classes={filteredData.classes} 
+            lessonPlans={filteredData.lessonPlans} settings={settings}
             onClassClick={handleNavigateToClass}
             onTaskClick={handleNavigateToTasks}
           />;
         case 'classes':
           if (selectedClassId) {
-            const cls = classes.find(c => c.id === selectedClassId);
+            const cls = filteredData.classes.find(c => c.id === selectedClassId);
             return cls ? (
               <ClassDetails 
-                cls={cls} students={students} lessonPlans={lessonPlans}
+                cls={cls} students={students} lessonPlans={filteredData.lessonPlans}
                 setLessonPlans={setLessonPlans} attendance={attendance}
                 setAttendance={setAttendance} settings={settings}
                 examResults={examResults} setExamResults={setExamResults}
@@ -205,10 +230,11 @@ const App: React.FC = () => {
             ) : null;
           }
           return <ClassRegistry 
-            classes={classes} 
+            classes={filteredData.classes} 
             onSelectClass={setSelectedClassId} 
             settings={settings}
-            lessonPlans={lessonPlans}
+            lessonPlans={filteredData.lessonPlans}
+            currentUser={currentUser}
           />;
         case 'tasks':
           return <TaskBoard tasks={tasks} settings={settings} />;
@@ -219,18 +245,18 @@ const App: React.FC = () => {
       }
     }
 
-    if (currentUser.role === 'STUDENT') {
+    if (currentUser.role === 'STUDENT' && filteredData) {
       return (
         <StudentDashboard 
           student={currentUser} 
-          classes={classes} 
-          attendance={attendance} 
-          examResults={examResults} 
+          classes={filteredData.classes} 
+          attendance={filteredData.attendance} 
+          examResults={filteredData.examResults} 
         />
       );
     }
 
-    return null;
+    return <div className="p-20 text-center font-bold text-slate-400">UNAUTHORIZED ACCESS OR DATA SYNC ERROR</div>;
   };
 
   return (
@@ -256,7 +282,7 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 mt-10 px-4 space-y-2">
-          {menuItems[currentUser.role].map((item) => (
+          {menuItems[currentUser.role]?.map((item) => (
             <button
               key={item.id}
               onClick={() => { setActiveMenu(item.id); setSelectedClassId(null); }}
