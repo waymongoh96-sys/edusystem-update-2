@@ -153,6 +153,7 @@ const App: React.FC = () => {
       return <AdminView 
         teachers={teachers}
         students={students}
+        classes={classes}
       />;
     }
 
@@ -226,7 +227,7 @@ const App: React.FC = () => {
       <aside className={`bg-slate-900 text-white transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-24'} flex flex-col shrink-0`}>
         <div className="p-6 flex items-center gap-3">
           <div className="theme-bg p-2 rounded-xl shadow-lg shadow-blue-500/20">
-            <GraduationCap className="w-6 h-6 text-white" />
+            < GraduationCap className="w-6 h-6 text-white" />
           </div>
           {sidebarOpen && <span className="font-black text-xl tracking-tight uppercase">EduAssist</span>}
         </div>

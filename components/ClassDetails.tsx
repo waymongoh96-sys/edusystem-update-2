@@ -2,14 +2,14 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   ChevronLeft, Plus, Edit, FileText, CheckCircle2, Clock, Trash2, 
-  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File
+  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter
 } from 'lucide-react';
 import { 
   Class, User, LessonPlan, AttendanceRecord, SystemSettings, 
   TaskStatus, AttendanceStatus, ExamResult 
 } from '../types';
 import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 interface ClassDetailsProps {
   cls: Class;
@@ -34,6 +34,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [showPlanningModal, setShowPlanningModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterStandard, setFilterStandard] = useState('');
   const [isEditingExams, setIsEditingExams] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -44,6 +45,11 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     students.filter(s => cls.enrolledStudentIds.includes(s.id)), 
     [students, cls.enrolledStudentIds]
   );
+
+  const availableStandards = useMemo(() => {
+    const stds = students.map(s => s.standard).filter(Boolean) as string[];
+    return Array.from(new Set(stds)).sort();
+  }, [students]);
 
   const filteredLessonPlans = useMemo(() => 
     lessonPlans.filter(lp => lp.classId === cls.id).sort((a,b) => b.date.localeCompare(a.date)),
@@ -99,6 +105,17 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const handleAttendanceChange = async (studentId: string, status: AttendanceStatus) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
+    
+    // Toggle behavior: if the same status is clicked, delete the record (undo)
+    if (existing?.status === status) {
+      try {
+        await deleteDoc(doc(db, 'attendance', recordId));
+      } catch (err) {
+        console.error("Failed to delete record:", err);
+      }
+      return;
+    }
+
     const record: AttendanceRecord = {
       id: recordId,
       classId: cls.id,
@@ -150,6 +167,16 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
+  const handleRemoveStudent = (studentId: string) => {
+    if (window.confirm("Remove this student from the class? This action will not delete the student account itself.")) {
+      const updatedClass = {
+        ...cls,
+        enrolledStudentIds: cls.enrolledStudentIds.filter(id => id !== studentId)
+      };
+      updateClass(updatedClass);
+    }
+  };
+
   const analyticsData = useMemo(() => {
     const data = enrolledStudents.map(s => {
       const targetScore = examResults.find(r => r.classId === cls.id && r.studentId === s.id && r.examName === selectedGraphExam)?.score || 0;
@@ -182,6 +209,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             <h1 className="text-4xl font-black text-slate-800 flex items-center gap-4">
               <div className="w-6 h-12 rounded-full shadow-lg" style={{ backgroundColor: cls.themeColor }} />
               {cls.name}
+              <span className="text-xl text-slate-300 font-bold ml-2">({enrolledStudents.length})</span>
             </h1>
             <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">{cls.classDay}s at {cls.classTime}</p>
           </div>
@@ -253,10 +281,19 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                   {enrolledStudents.map(student => {
                     const record = attendance.find(a => a.id === `${cls.id}-${student.id}-${selectedDate}`);
                     return (
-                      <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
+                      <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
                         <td className="px-6 py-6">
                           <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary text-xs shadow-inner">{student.name.charAt(0)}</div>
+                            <div className="relative">
+                              <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary text-xs shadow-inner">{student.name.charAt(0)}</div>
+                              <button 
+                                onClick={() => handleRemoveStudent(student.id)}
+                                title="Remove Student"
+                                className="absolute -top-2 -right-2 bg-white border border-slate-200 text-red-400 p-1 rounded-full shadow-sm hover:text-red-600 transition-all opacity-0 group-hover:opacity-100"
+                              >
+                                <UserMinus className="w-3 h-3" />
+                              </button>
+                            </div>
                             <span className="font-black text-slate-800 text-sm">{student.name}</span>
                           </div>
                         </td>
@@ -285,6 +322,13 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                       </tr>
                     );
                   })}
+                  {enrolledStudents.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
+                        No students enrolled in this node yet.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
            </div>
@@ -374,7 +418,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                        <div className="h-full theme-bg transition-all duration-1000 rounded-r-lg overflow-hidden" style={{ width: `${student.current}%`, backgroundColor: cls.themeColor }} />
                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-700">{student.current}%</span>
                        
-                       {/* Finalized solid black dotted line for average score */}
                        <div className="absolute top-0 bottom-0 border-r-2 border-dotted border-black z-20 pointer-events-none transition-all duration-500" style={{ left: `${analyticsData.average}%` }} />
                     </div>
                   </div>
@@ -461,20 +504,49 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
               <h2 className="text-3xl font-black text-slate-800 tracking-tight">System Registry</h2>
               <button onClick={() => setShowEnrolModal(false)} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
-            <div className="relative mb-6">
-               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-               <input className="w-full py-5 pl-14 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold" placeholder="Query registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            <div className="flex flex-col md:flex-row gap-4 mb-6">
+               <div className="relative flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <input className="w-full py-5 pl-14 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold" placeholder="Query registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+               </div>
+               <div className="relative min-w-[150px]">
+                  <Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <select 
+                    className="w-full py-5 pl-12 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold text-sm appearance-none"
+                    value={filterStandard}
+                    onChange={e => setFilterStandard(e.target.value)}
+                  >
+                    <option value="">All Forms</option>
+                    {availableStandards.map(std => (
+                      <option key={std} value={std}>{std}</option>
+                    ))}
+                  </select>
+               </div>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 pr-4 custom-scrollbar">
-              {students.filter(s => !cls.enrolledStudentIds.includes(s.id) && s.name.toLowerCase().includes(searchTerm.toLowerCase())).map(student => (
+              {students
+                .filter(s => 
+                  !cls.enrolledStudentIds.includes(s.id) && 
+                  (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) &&
+                  (filterStandard === '' || s.standard === filterStandard)
+                )
+                .map(student => (
                 <div key={student.id} className="p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-all group">
                   <div className="flex items-center gap-4">
                      <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary">{student.name.charAt(0)}</div>
-                     <div><p className="font-black text-slate-800">{student.name}</p></div>
+                     <div>
+                        <p className="font-black text-slate-800">{student.name}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{student.standard || 'No Form'}</p>
+                     </div>
                   </div>
                   <button onClick={() => handleEnroll(student.id)} className="p-4 theme-bg text-white rounded-2xl shadow-lg hover:scale-105 transition-all"><Plus className="w-5 h-5" /></button>
                 </div>
               ))}
+              {students.filter(s => !cls.enrolledStudentIds.includes(s.id) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) && (filterStandard === '' || s.standard === filterStandard)).length === 0 && (
+                <div className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
+                  No matching nodes found in registry.
+                </div>
+              )}
             </div>
           </div>
         </div>

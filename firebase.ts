@@ -5,14 +5,13 @@ import { getFirestore } from 'firebase/firestore';
 
 // Replace with your actual Firebase project configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBGj8TirBAkQL9NpHHBa1QDQesis-SOIus",
-  authDomain: "edusystem-4df07.firebaseapp.com",
-  projectId: "edusystem-4df07",
-  storageBucket: "edusystem-4df07.firebasestorage.app",
-  messagingSenderId: "748439452487",
-  appId: "1:748439452487:web:afa13e290fc8f3f4f36a62",
-  measurementId: "G-7089RPPBV5"
-};;
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

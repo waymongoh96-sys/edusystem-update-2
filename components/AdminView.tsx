@@ -1,16 +1,18 @@
 
-import React, { useState } from 'react';
-import { User, UserStatus, Role } from '../types';
-import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { User, UserStatus, Role, Class } from '../types';
+// Added Users to the lucide-react imports
+import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 interface AdminViewProps {
   teachers: User[];
   students: User[];
+  classes: Class[];
 }
 
-const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
+const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) => {
   const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
   const [isBulkImporting, setIsBulkImporting] = useState(false);
@@ -18,6 +20,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
+
+  const stats = useMemo(() => {
+    const totalClasses = classes.length;
+    const totalStudentsTaught = classes.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
+    return { totalClasses, totalStudentsTaught };
+  }, [classes]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +95,39 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
   const currentList = activeTab === 'TEACHER' ? teachers : students;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
+      {/* Global Stats Dashboard */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
+          <div className="p-4 theme-light-bg rounded-2xl mb-4 group-hover:scale-110 transition-transform">
+            <BookOpen className="w-8 h-8 theme-primary" />
+          </div>
+          <h4 className="text-3xl font-black text-slate-800">{stats.totalClasses}</h4>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Classrooms</p>
+        </div>
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
+          <div className="p-4 bg-purple-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
+            <Users className="w-8 h-8 text-purple-600" />
+          </div>
+          <h4 className="text-3xl font-black text-slate-800">{stats.totalStudentsTaught}</h4>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Enrolled Nodes</p>
+        </div>
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
+          <div className="p-4 bg-emerald-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
+            <Briefcase className="w-8 h-8 text-emerald-600" />
+          </div>
+          <h4 className="text-3xl font-black text-slate-800">{teachers.length}</h4>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Staff Count</p>
+        </div>
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
+          <div className="p-4 bg-blue-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
+            <GraduationCap className="w-8 h-8 text-blue-600" />
+          </div>
+          <h4 className="text-3xl font-black text-slate-800">{students.length}</h4>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Unique Students</p>
+        </div>
+      </div>
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
