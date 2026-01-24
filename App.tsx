@@ -23,6 +23,13 @@ import { onSnapshot, collection, doc, setDoc, deleteDoc } from 'firebase/firesto
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 
+const THEME_MAP: Record<string, string> = {
+  blue: '#2563eb',
+  emerald: '#059669',
+  indigo: '#4f46e5',
+  orange: '#ea580c'
+};
+
 const App: React.FC = () => {
   // Global Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -116,6 +123,8 @@ const App: React.FC = () => {
     return [...autoTasks, ...tasks];
   }, [lessonPlans, tasks, classes]);
 
+  const primaryColor = useMemo(() => THEME_MAP[settings.themeColor] || THEME_MAP.blue, [settings.themeColor]);
+
   const handleNavigateToClass = (classId: string) => {
     setSelectedClassId(classId);
     setActiveMenu('classes');
@@ -203,7 +212,10 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen flex bg-slate-50/50">
       <style>{`
-        :root { --primary-color: #2563eb; --primary-light: #2563eb15; }
+        :root { 
+          --primary-color: ${primaryColor}; 
+          --primary-light: ${primaryColor}15; 
+        }
         .theme-primary { color: var(--primary-color) !important; }
         .theme-bg { background-color: var(--primary-color) !important; }
         .theme-border { border-color: var(--primary-color) !important; }

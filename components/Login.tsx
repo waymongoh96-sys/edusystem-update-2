@@ -17,7 +17,7 @@ const Login: React.FC = () => {
 
     try {
       let email = username.trim().toLowerCase();
-      // Handle the case where user types just "admin"
+      // Improved logic to catch 'admin' reliably
       if (email === 'admin') {
         email = 'admin@eduassist.com';
       } else if (!email.includes('@')) {
@@ -26,8 +26,8 @@ const Login: React.FC = () => {
 
       await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      setError('Authentication failed. Check your credentials.');
-      console.error(err);
+      setError('Authentication failed. Ensure you have created the user in Firebase Auth.');
+      console.error("Login error:", err);
     } finally {
       setLoading(false);
     }
@@ -57,8 +57,9 @@ const Login: React.FC = () => {
               <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
                 required
+                autoComplete="username"
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-5 pl-14 pr-6 outline-none font-bold text-sm focus:ring-4 focus:ring-blue-100 transition-all"
-                placeholder="Username / Email"
+                placeholder="Username (e.g. admin)"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -68,6 +69,7 @@ const Login: React.FC = () => {
               <input
                 required
                 type="password"
+                autoComplete="current-password"
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-5 pl-14 pr-6 outline-none font-bold text-sm focus:ring-4 focus:ring-blue-100 transition-all"
                 placeholder="Secure Password"
                 value={password}
@@ -85,7 +87,7 @@ const Login: React.FC = () => {
           </button>
 
           <div className="text-center pt-4">
-            <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Proprietary Educational Infrastructure</p>
+            <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest leading-relaxed">Proprietary Educational Infrastructure<br/>Cloud Sync Enabled</p>
           </div>
         </form>
       </div>

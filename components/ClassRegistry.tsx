@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Plus, Clock, Calendar, Users, X, BookOpen, ChevronRight, CheckCircle2, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Clock, Calendar, Users, X, BookOpen, ChevronRight, CheckCircle2, Edit2, Trash2, Palette } from 'lucide-react';
 import { Class, SystemSettings, LessonPlan, TaskStatus } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
@@ -82,8 +82,13 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
 
   const handleDeleteClass = async (e: React.MouseEvent, classId: string) => {
     e.stopPropagation();
-    if (window.confirm("Permanently delete this classroom? All data will be lost.")) {
-      await deleteDoc(doc(db, 'classes', classId));
+    if (window.confirm("Permanently delete this classroom? This will remove all associated logs and student records.")) {
+      try {
+        await deleteDoc(doc(db, 'classes', classId));
+      } catch (err) {
+        console.error("Delete failed:", err);
+        alert("Failed to delete. Check your Firebase permissions.");
+      }
     }
   };
 
@@ -93,17 +98,23 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
     const classData: Class = {
       id: classId,
       ...formData,
-      teacherId: 't1', // Simplified
+      teacherId: 't1', 
       enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : []
     };
-    await setDoc(doc(db, 'classes', classId), classData);
-    setIsAdding(false);
-    setEditingClass(null);
+    
+    try {
+      await setDoc(doc(db, 'classes', classId), classData);
+      setIsAdding(false);
+      setEditingClass(null);
+    } catch (err) {
+      console.error("Save failed:", err);
+      alert("Failed to save data. Please check your Firestore Security Rules.");
+    }
   };
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">System Registry</h1>
           <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Institutional Operations</p>
@@ -118,11 +129,17 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
         {classes.map(cls => (
           <div key={cls.id} onClick={() => onSelectClass(cls.id)} className="bg-white rounded-[2.5rem] p-8 border border-slate-200 hover:theme-border hover:shadow-2xl hover:-translate-y-1 transition-all cursor-pointer group relative overflow-hidden">
             <div className="w-2 h-16 absolute left-0 top-1/2 -translate-y-1/2 rounded-r-xl" style={{ backgroundColor: cls.themeColor }} />
-            <div className="flex justify-between items-start mb-4">
-               <h3 className="text-2xl font-black text-slate-800 group-hover:theme-primary transition-colors">{cls.name}</h3>
-               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={(e) => handleOpenEdit(e, cls)} className="p-2 bg-slate-50 text-slate-400 hover:theme-primary rounded-xl transition-all"><Edit2 className="w-4 h-4" /></button>
-                  <button onClick={(e) => handleDeleteClass(e, cls.id)} className="p-2 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
+            <div className="flex justify-between items-start mb-6">
+               <div className="flex-1 min-w-0">
+                 <h3 className="text-2xl font-black text-slate-800 group-hover:theme-primary transition-colors truncate">{cls.name}</h3>
+               </div>
+               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity ml-4">
+                  <button onClick={(e) => handleOpenEdit(e, cls)} className="p-3 bg-slate-50 text-slate-400 hover:theme-primary rounded-xl transition-all shadow-sm">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button onClick={(e) => handleDeleteClass(e, cls.id)} className="p-3 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl transition-all shadow-sm">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                </div>
             </div>
             <div className="space-y-4">
@@ -168,21 +185,32 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
             <button onClick={() => {setIsAdding(false); setEditingClass(null);}} className="absolute top-10 right-10 p-2 text-slate-300 hover:text-slate-500 transition-all"><X className="w-8 h-8" /></button>
             <h2 className="text-3xl font-black text-slate-800 mb-10">{editingClass ? 'Edit Classroom' : 'New Classroom'}</h2>
             <form onSubmit={handleSaveClass} className="space-y-6">
-              <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Designation</label><input required placeholder="e.g. Advanced Bio" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl outline-none theme-ring font-bold text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Designation</label>
+                <input required placeholder="e.g. Advanced Bio" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl outline-none theme-ring font-bold text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+              </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Day</label><select className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none" value={formData.classDay} onChange={e => setFormData({...formData, classDay: e.target.value})}>{DAYS_OF_WEEK.map(day => <option key={day} value={day}>{day}</option>)}</select></div>
-                <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Time</label><input type="time" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none" value={formData.classTime} onChange={e => setFormData({...formData, classTime: e.target.value})} /></div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Day</label>
+                  <select className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none" value={formData.classDay} onChange={e => setFormData({...formData, classDay: e.target.value})}>
+                    {DAYS_OF_WEEK.map(day => <option key={day} value={day}>{day}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Time</label>
+                  <input type="time" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none" value={formData.classTime} onChange={e => setFormData({...formData, classTime: e.target.value})} />
+                </div>
               </div>
               <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Theme Color</label>
-                 <div className="flex gap-4 p-2 bg-slate-50 rounded-2xl border border-slate-100">
-                    {['#3b82f6', '#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6'].map(c => (
-                      <button type="button" key={c} onClick={() => setFormData({...formData, themeColor: c})} className={`w-8 h-8 rounded-full border-4 ${formData.themeColor === c ? 'border-white shadow-lg scale-110' : 'border-transparent'}`} style={{ backgroundColor: c }} />
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 flex items-center gap-2"><Palette className="w-3.5 h-3.5" /> Classroom Identity</label>
+                 <div className="flex flex-wrap gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    {['#3b82f6', '#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'].map(c => (
+                      <button type="button" key={c} onClick={() => setFormData({...formData, themeColor: c})} className={`w-10 h-10 rounded-full border-4 transition-all ${formData.themeColor === c ? 'border-white shadow-lg scale-110' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
                     ))}
                  </div>
               </div>
               <button type="submit" className="w-full theme-bg text-white py-6 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl mt-6 transition-all active:scale-95">
-                {editingClass ? 'Update Node' : 'Initialize Node'}
+                {editingClass ? 'Update Registry' : 'Initialize Node'}
               </button>
             </form>
           </div>

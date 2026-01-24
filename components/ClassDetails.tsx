@@ -79,8 +79,13 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const handleSaveLessonPlan = async () => {
     const planId = activePlanId || Date.now().toString();
     const planData: LessonPlan = { id: planId, classId: cls.id, ...(lpFormData as LessonPlan) };
-    await setDoc(doc(db, 'lessonPlans', planId), planData);
-    setShowPlanningModal(false);
+    try {
+      await setDoc(doc(db, 'lessonPlans', planId), planData);
+      setShowPlanningModal(false);
+    } catch (err) {
+      console.error("Save plan failed:", err);
+      alert("Permission denied. Ensure Firestore rules are set to public for authenticated users.");
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -369,6 +374,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                        <div className="h-full theme-bg transition-all duration-1000 rounded-r-lg overflow-hidden" style={{ width: `${student.current}%`, backgroundColor: cls.themeColor }} />
                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-700">{student.current}%</span>
                        
+                       {/* Finalized solid black dotted line for average score */}
                        <div className="absolute top-0 bottom-0 border-r-2 border-dotted border-black z-20 pointer-events-none transition-all duration-500" style={{ left: `${analyticsData.average}%` }} />
                     </div>
                   </div>

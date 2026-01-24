@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { User, UserStatus, Role } from '../types';
-import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase } from 'lucide-react';
+import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 interface AdminViewProps {
   teachers: User[];
@@ -13,6 +13,8 @@ interface AdminViewProps {
 const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
   const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
+  const [isBulkImporting, setIsBulkImporting] = useState(false);
+  const [bulkData, setBulkData] = useState('');
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
@@ -31,6 +33,48 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
     
     setIsAdding(false);
     setFormData({ name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1' });
+  };
+
+  const handleBulkImport = async () => {
+    if (!bulkData.trim()) return;
+    
+    const lines = bulkData.split('\n');
+    const batch = writeBatch(db);
+    let count = 0;
+
+    lines.forEach((line) => {
+      const parts = line.split(',').map(p => p.trim());
+      if (parts.length >= 2) {
+        const name = parts[0];
+        const username = parts[1];
+        const age = parts[2] ? parseInt(parts[2]) : 10;
+        const standard = parts[3] || '1';
+        const id = `bulk-${Date.now()}-${count}`;
+        
+        const newUser: User = {
+          id,
+          name,
+          username,
+          password: 'password123', // Default password
+          role: 'STUDENT',
+          status: UserStatus.ACTIVE,
+          age,
+          standard
+        };
+        
+        const ref = doc(db, 'students', id);
+        batch.set(ref, newUser);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      alert(`Successfully imported ${count} students.`);
+    }
+    
+    setIsBulkImporting(false);
+    setBulkData('');
   };
 
   const handleDelete = async (user: User) => {
@@ -52,13 +96,24 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
           </h1>
           <p className="text-slate-500">Master database for all educational stakeholders.</p>
         </div>
-        <button 
-          onClick={() => setIsAdding(true)}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"
-        >
-          <Plus className="w-5 h-5" />
-          Register New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}
-        </button>
+        <div className="flex gap-3">
+          {activeTab === 'STUDENT' && (
+            <button 
+              onClick={() => setIsBulkImporting(true)}
+              className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <Upload className="w-5 h-5" />
+              Bulk Import
+            </button>
+          )}
+          <button 
+            onClick={() => setIsAdding(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"
+          >
+            <Plus className="w-5 h-5" />
+            Register New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}
+          </button>
+        </div>
       </div>
 
       <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
@@ -222,6 +277,54 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
                 Create Account
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isBulkImporting && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-xl w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-2xl font-black text-slate-800">Bulk Registry Import</h2>
+                <p className="text-sm text-slate-400 font-bold uppercase tracking-widest mt-1">Student Node Provisioning</p>
+              </div>
+              <button onClick={() => setIsBulkImporting(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Instructions</p>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Enter one student per line in the following format:<br/>
+                  <code className="bg-slate-200 px-2 py-0.5 rounded font-mono text-purple-700 font-bold">Name, Username, Age, Standard</code><br/><br/>
+                  Example:<br/>
+                  <code className="text-slate-400 font-mono">Alice Smith, alice, 10, 4A<br/>Bob Jones, bob, 11, 5B</code>
+                </p>
+              </div>
+
+              <textarea 
+                className="w-full h-64 p-6 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-mono text-sm focus:ring-4 focus:ring-purple-100 transition-all"
+                placeholder="Alice Smith, alice, 10, 4A..."
+                value={bulkData}
+                onChange={(e) => setBulkData(e.target.value)}
+              />
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setIsBulkImporting(false)}
+                  className="flex-1 py-4 bg-slate-100 text-slate-500 font-black uppercase text-xs tracking-widest rounded-xl"
+                >
+                  Discard
+                </button>
+                <button 
+                  onClick={handleBulkImport}
+                  className="flex-2 py-4 bg-purple-600 text-white font-black uppercase text-xs tracking-widest rounded-xl shadow-lg shadow-purple-100 hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Upload className="w-4 h-4" /> Initialize Registry
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
