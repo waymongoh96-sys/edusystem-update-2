@@ -1,15 +1,16 @@
 
 import React, { useState } from 'react';
-import { Plus, X, Calendar, Edit2, ListChecks, CheckCircle2 } from 'lucide-react';
+import { Plus, X, Calendar, Edit2, ListChecks, CheckCircle2, Trash2 } from 'lucide-react';
 import { Task, TaskStatus, SystemSettings } from '../types';
+import { db } from '../firebase';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 interface TaskBoardProps {
   tasks: Task[];
-  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   settings: SystemSettings;
 }
 
-const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, settings }) => {
+const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, settings }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Task>>({
@@ -22,15 +23,18 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, settings }) => {
     setIsAdding(true);
   };
 
-  const handleCreateTask = (e: React.FormEvent) => {
+  const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingTaskId) {
-      setTasks(prev => prev.map(t => t.id === editingTaskId ? { ...t, ...formData } as Task : t));
-    } else {
-      const newTask: Task = { id: Date.now().toString(), ...(formData as Task) };
-      setTasks([...tasks, newTask]);
-    }
+    const taskId = editingTaskId || Date.now().toString();
+    const taskData: Task = { id: taskId, ...(formData as Task) };
+    await setDoc(doc(db, 'tasks', taskId), taskData);
     closeModal();
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (window.confirm("Delete this task?")) {
+      await deleteDoc(doc(db, 'tasks', taskId));
+    }
   };
 
   const closeModal = () => {
@@ -39,8 +43,11 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, settings }) => {
     setFormData({ name: '', dueDate: '', category: settings.taskCategories[0], status: TaskStatus.HAVENT_START });
   };
 
-  const moveTask = (taskId: string, newStatus: TaskStatus) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+  const moveTask = async (taskId: string, newStatus: TaskStatus) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      await setDoc(doc(db, 'tasks', taskId), { ...task, status: newStatus });
+    }
   };
 
   const columns = [
@@ -110,9 +117,14 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, settings }) => {
                       {task.category.substring(0, 3)}
                     </span>
                     <h4 className="text-[11px] font-black text-slate-800 flex-1 truncate">{task.name}</h4>
-                    <button onClick={() => handleOpenEdit(task)} className="p-1 text-slate-300 hover:theme-primary transition-colors">
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                      <button onClick={() => handleOpenEdit(task)} className="p-1 text-slate-300 hover:theme-primary transition-colors">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDeleteTask(task.id)} className="p-1 text-slate-300 hover:text-red-500 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between text-[9px] font-bold text-slate-400">
                     <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {task.dueDate}</span>

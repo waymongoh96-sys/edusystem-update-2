@@ -8,6 +8,8 @@ import {
   Class, User, LessonPlan, AttendanceRecord, SystemSettings, 
   TaskStatus, AttendanceStatus, ExamResult 
 } from '../types';
+import { db } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface ClassDetailsProps {
   cls: Class;
@@ -74,13 +76,10 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     setShowPlanningModal(true);
   };
 
-  const handleSaveLessonPlan = () => {
-    if (activePlanId) {
-       setLessonPlans(lessonPlans.map(lp => lp.id === activePlanId ? { ...lp, ...lpFormData } as LessonPlan : lp));
-    } else {
-      const newLp: LessonPlan = { id: Date.now().toString(), classId: cls.id, ...(lpFormData as LessonPlan) };
-      setLessonPlans([newLp, ...lessonPlans]);
-    }
+  const handleSaveLessonPlan = async () => {
+    const planId = activePlanId || Date.now().toString();
+    const planData: LessonPlan = { id: planId, classId: cls.id, ...(lpFormData as LessonPlan) };
+    await setDoc(doc(db, 'lessonPlans', planId), planData);
     setShowPlanningModal(false);
   };
 
@@ -92,28 +91,34 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  const handleAttendanceChange = (studentId: string, status: AttendanceStatus) => {
+  const handleAttendanceChange = async (studentId: string, status: AttendanceStatus) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
-    const existingIndex = attendance.findIndex(a => a.id === recordId);
-    if (existingIndex > -1) {
-      const updated = [...attendance];
-      updated[existingIndex] = { ...updated[existingIndex], status };
-      setAttendance(updated);
-    } else {
-      setAttendance([...attendance, { id: recordId, classId: cls.id, studentId, date: selectedDate, status, performanceComment: '' }]);
-    }
+    const existing = attendance.find(a => a.id === recordId);
+    const record: AttendanceRecord = {
+      id: recordId,
+      classId: cls.id,
+      studentId,
+      date: selectedDate,
+      status,
+      performanceComment: existing?.performanceComment || '',
+      reason: existing?.reason || ''
+    };
+    await setDoc(doc(db, 'attendance', recordId), record);
   };
 
-  const updateAttendanceField = (studentId: string, field: keyof AttendanceRecord, value: string) => {
+  const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: string) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
-    const existingIndex = attendance.findIndex(a => a.id === recordId);
-    if (existingIndex > -1) {
-      const updated = [...attendance];
-      updated[existingIndex] = { ...updated[existingIndex], [field]: value };
-      setAttendance(updated);
-    } else {
-      setAttendance([...attendance, { id: recordId, classId: cls.id, studentId, date: selectedDate, status: AttendanceStatus.PRESENT, performanceComment: '', [field]: value } as AttendanceRecord]);
-    }
+    const existing = attendance.find(a => a.id === recordId);
+    const record: AttendanceRecord = {
+      id: recordId,
+      classId: cls.id,
+      studentId,
+      date: selectedDate,
+      status: existing?.status || AttendanceStatus.PRESENT,
+      performanceComment: existing?.performanceComment || '',
+      [field]: value
+    } as AttendanceRecord;
+    await setDoc(doc(db, 'attendance', recordId), record);
   };
 
   const getAttendanceBtnColor = (status: AttendanceStatus, isActive: boolean) => {
@@ -126,14 +131,11 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  const updateExamScore = (studentId: string, examName: string, score: string) => {
+  const updateExamScore = async (studentId: string, examName: string, score: string) => {
     const val = parseFloat(score) || 0;
-    const existing = examResults.find(r => r.classId === cls.id && r.studentId === studentId && r.examName === examName);
-    if (existing) {
-      setExamResults(examResults.map(r => r.id === existing.id ? { ...r, score: val } : r));
-    } else {
-      setExamResults([...examResults, { id: `${cls.id}-${studentId}-${examName}`, classId: cls.id, studentId, examName, score: val }]);
-    }
+    const examId = `${cls.id}-${studentId}-${examName}`;
+    const record: ExamResult = { id: examId, classId: cls.id, studentId, examName, score: val };
+    await setDoc(doc(db, 'examResults', examId), record);
   };
 
   const handleEnroll = (studentId: string) => {
@@ -367,7 +369,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                        <div className="h-full theme-bg transition-all duration-1000 rounded-r-lg overflow-hidden" style={{ width: `${student.current}%`, backgroundColor: cls.themeColor }} />
                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-700">{student.current}%</span>
                        
-                       {/* Corrected: Solid black dotted average line inside the bar container for accurate positioning */}
                        <div className="absolute top-0 bottom-0 border-r-2 border-dotted border-black z-20 pointer-events-none transition-all duration-500" style={{ left: `${analyticsData.average}%` }} />
                     </div>
                   </div>

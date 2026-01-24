@@ -45,16 +45,14 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // In a real app, you'd fetch the user profile from Firestore here
-        // For the demo, we'll determine role based on email or use the admin credentials
         const email = firebaseUser.email || '';
         let role: Role = 'TEACHER';
-        if (email.startsWith('admin')) role = 'ADMIN';
-        if (email.startsWith('student')) role = 'STUDENT';
+        if (email.toLowerCase().includes('admin')) role = 'ADMIN';
+        if (email.toLowerCase().includes('student')) role = 'STUDENT';
 
         setCurrentUser({
           id: firebaseUser.uid,
-          name: firebaseUser.displayName || 'System User',
+          name: firebaseUser.displayName || email.split('@')[0],
           username: email.split('@')[0],
           role: role,
           status: UserStatus.ACTIVE
@@ -92,9 +90,12 @@ const App: React.FC = () => {
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => {
       setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
     });
+    const unsubSettings = onSnapshot(doc(db, 'config', 'settings'), (snap) => {
+      if (snap.exists()) setSettings(snap.data() as SystemSettings);
+    });
 
     return () => {
-      unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); unsubExams(); unsubStudents(); unsubTeachers();
+      unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
     };
   }, [currentUser]);
 
@@ -124,7 +125,7 @@ const App: React.FC = () => {
     setActiveMenu('tasks');
   };
 
-  // Firestore Data Operations
+  // Firestore Data Operations - Expose setters to components
   const deleteLessonPlan = async (id: string) => {
     await deleteDoc(doc(db, 'lessonPlans', id));
   };
@@ -141,8 +142,8 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (currentUser.role === 'ADMIN') {
       return <AdminView 
-        teachers={teachers} setTeachers={setTeachers} 
-        students={students} setStudents={setStudents} 
+        teachers={teachers}
+        students={students}
       />;
     }
 
@@ -171,14 +172,15 @@ const App: React.FC = () => {
             ) : null;
           }
           return <ClassRegistry 
-            classes={classes} setClasses={setClasses} 
-            onSelectClass={setSelectedClassId} settings={settings}
-            lessonPlans={lessonPlans} setLessonPlans={setLessonPlans}
+            classes={classes} 
+            onSelectClass={setSelectedClassId} 
+            settings={settings}
+            lessonPlans={lessonPlans}
           />;
         case 'tasks':
-          return <TaskBoard tasks={tasks} setTasks={setTasks} settings={settings} />;
+          return <TaskBoard tasks={tasks} settings={settings} />;
         case 'settings':
-          return <SettingsView settings={settings} setSettings={setSettings} />;
+          return <SettingsView settings={settings} />;
         default:
           return null;
       }

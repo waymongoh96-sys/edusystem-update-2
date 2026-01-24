@@ -2,13 +2,14 @@
 import React, { useState } from 'react';
 import { Palette, ShieldAlert, Plus, Trash2, CheckCircle2, ListChecks, Calendar } from 'lucide-react';
 import { SystemSettings, Holiday } from '../types';
+import { db } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface SettingsProps {
   settings: SystemSettings;
-  setSettings: React.Dispatch<React.SetStateAction<SystemSettings>>;
 }
 
-const SettingsView: React.FC<SettingsProps> = ({ settings, setSettings }) => {
+const SettingsView: React.FC<SettingsProps> = ({ settings }) => {
   const [newHoliday, setNewHoliday] = useState({ date: '', description: '' });
   const [newLabel, setNewLabel] = useState({ key: '' as keyof SystemSettings, val: '' });
 
@@ -19,8 +20,9 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, setSettings }) => {
     { name: 'Sunset Orange', color: 'orange', hex: '#ea580c' }
   ];
 
-  const updateSettings = (key: keyof SystemSettings, val: any) => {
-    setSettings(prev => ({ ...prev, [key]: val }));
+  const updateSettings = async (key: keyof SystemSettings, val: any) => {
+    const updated = { ...settings, [key]: val };
+    await setDoc(doc(db, 'config', 'settings'), updated);
   };
 
   const addItem = (key: keyof SystemSettings) => {
@@ -50,7 +52,6 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, setSettings }) => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
-        {/* Appearance Card */}
         <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
            <div className="flex items-center gap-4 mb-10">
               <div className="p-4 theme-light-bg rounded-3xl">
@@ -81,7 +82,6 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, setSettings }) => {
            </div>
         </div>
 
-        {/* Global Label Management */}
         <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
            <div className="flex items-center gap-4 mb-10">
               <div className="p-4 theme-light-bg rounded-3xl">
@@ -119,7 +119,6 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, setSettings }) => {
            </div>
         </div>
 
-        {/* Holiday Management */}
         <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200 xl:col-span-2">
            <div className="flex items-center gap-4 mb-10">
               <div className="p-4 bg-red-50 rounded-3xl">

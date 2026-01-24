@@ -2,36 +2,42 @@
 import React, { useState } from 'react';
 import { User, UserStatus, Role } from '../types';
 import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase } from 'lucide-react';
+import { db } from '../firebase';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 interface AdminViewProps {
   teachers: User[];
-  setTeachers: React.Dispatch<React.SetStateAction<User[]>>;
   students: User[];
-  setStudents: React.Dispatch<React.SetStateAction<User[]>>;
 }
 
-const AdminView: React.FC<AdminViewProps> = ({ teachers, setTeachers, students, setStudents }) => {
+const AdminView: React.FC<AdminViewProps> = ({ teachers, students }) => {
   const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const id = Date.now().toString();
     const newUser: User = {
       ...formData as User,
-      id: Date.now().toString(),
+      id,
       role: activeTab
     };
 
-    if (activeTab === 'TEACHER') {
-      setTeachers([...teachers, newUser]);
-    } else {
-      setStudents([...students, newUser]);
-    }
+    const collectionName = activeTab === 'TEACHER' ? 'teachers' : 'students';
+    await setDoc(doc(db, collectionName, id), newUser);
+    
     setIsAdding(false);
     setFormData({ name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1' });
+  };
+
+  const handleDelete = async (user: User) => {
+    if (window.confirm(`Delete ${user.name}?`)) {
+      const collectionName = user.role === 'TEACHER' ? 'teachers' : 'students';
+      await deleteDoc(doc(db, collectionName, user.id));
+    }
   };
 
   const currentList = activeTab === 'TEACHER' ? teachers : students;
@@ -117,7 +123,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, setTeachers, students, 
                     </td>
                   )}
                   <td className="px-8 py-5 text-right">
-                    <button className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                    <button onClick={() => handleDelete(user)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
                       <Trash2 className="w-5 h-5" />
                     </button>
                   </td>

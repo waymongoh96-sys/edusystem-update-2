@@ -16,12 +16,12 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      // Special check for specified Admin credentials
-      let email = username;
-      if (username === 'admin' && password === 'admin12346@') {
+      let email = username.trim().toLowerCase();
+      // Handle the case where user types just "admin"
+      if (email === 'admin') {
         email = 'admin@eduassist.com';
-      } else if (!username.includes('@')) {
-        email = `${username}@eduassist.com`;
+      } else if (!email.includes('@')) {
+        email = `${email}@eduassist.com`;
       }
 
       await signInWithEmailAndPassword(auth, email, password);
