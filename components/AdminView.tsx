@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { User, UserStatus, Role, Class } from '../types';
+import { User, UserStatus, Class } from '../types';
 import { 
   Plus, Users, Edit, Filter, Trash2, BookOpen, 
-  Briefcase, GraduationCap, AlertTriangle, Link, X
+  Briefcase, GraduationCap, AlertTriangle, CheckCircle2, Clock
 } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
 
 interface AdminViewProps {
   teachers: User[];
@@ -14,7 +14,8 @@ interface AdminViewProps {
 }
 
 const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) => {
-  const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
+  // Added 'CLASSES' to the active tab state
+  const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT' | 'CLASSES'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [isBulkImporting, setIsBulkImporting] = useState(false);
@@ -24,14 +25,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
 
-  // --- SMART DATA ANALYSIS ---
-  // Detect classes that don't belong to any valid teacher in the list
-  const orphanClasses = useMemo(() => {
-    const validTeacherIds = new Set(teachers.map(t => t.id));
-    return classes.filter(c => !validTeacherIds.has(c.teacherId));
-  }, [classes, teachers]);
-
-  // Filter Logic
+  // --- STATS LOGIC ---
   const stats = useMemo(() => {
     const filteredClasses = teacherFilter === 'ALL' 
       ? classes 
@@ -52,55 +46,51 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     };
   }, [classes, teacherFilter]);
 
+  // --- LIST FILTERING LOGIC ---
   const currentList = useMemo(() => {
     if (activeTab === 'TEACHER') {
       if (teacherFilter === 'ALL') return teachers;
       return teachers.filter(t => String(t.id) === String(teacherFilter));
     }
-    if (teacherFilter !== 'ALL') {
-      const teacherClassIds = classes
-        .filter(c => String(c.teacherId) === String(teacherFilter))
-        .map(c => c.id);
-      return students.filter(s => {
-        return classes.some(c => {
-          const ids = c.enrolledStudentIds || (c as any).studentIds || [];
-          return teacherClassIds.includes(c.id) && ids.includes(s.id);
+    if (activeTab === 'STUDENT') {
+      if (teacherFilter !== 'ALL') {
+        const teacherClassIds = classes
+          .filter(c => String(c.teacherId) === String(teacherFilter))
+          .map(c => c.id);
+        return students.filter(s => {
+          return classes.some(c => {
+            const ids = c.enrolledStudentIds || (c as any).studentIds || [];
+            return teacherClassIds.includes(c.id) && ids.includes(s.id);
+          });
         });
-      });
+      }
+      return students;
     }
-    return students;
+    // CLASSES Tab Logic
+    if (activeTab === 'CLASSES') {
+      if (teacherFilter === 'ALL') return classes;
+      return classes.filter(c => String(c.teacherId) === String(teacherFilter));
+    }
+    return [];
   }, [activeTab, teachers, students, teacherFilter, classes]);
 
-  // --- ACTIONS ---
-  const handleClaimOrphans = async () => {
-    if (teacherFilter === 'ALL') {
-      alert("Please select a specific Teacher from the dropdown first to assign these classes to.");
-      return;
-    }
-    
-    const targetTeacher = teachers.find(t => t.id === teacherFilter);
-    if (!targetTeacher) return;
-
-    if (!window.confirm(`Found ${orphanClasses.length} unassigned classes. Transfer them to ${targetTeacher.name}?`)) return;
-
+  // --- INDIVIDUAL ASSIGNMENT FUNCTION ---
+  const handleAssignTeacher = async (classId: string, newTeacherId: string) => {
     try {
-      const batch = writeBatch(db);
-      orphanClasses.forEach(cls => {
-        const ref = doc(db, 'classes', cls.id);
-        batch.update(ref, { teacherId: targetTeacher.id });
+      await updateDoc(doc(db, 'classes', classId), {
+        teacherId: newTeacherId
       });
-      await batch.commit();
-      alert("Success! Classes assigned.");
-    } catch (err) {
-      console.error("Migration failed:", err);
-      alert("Failed to update classes.");
+      // No alert needed, UI updates automatically via listener
+    } catch (error) {
+      console.error("Assignment failed:", error);
+      alert("Failed to assign teacher.");
     }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = editingUserId || Date.now().toString();
-    const newUser: User = { ...formData as User, id, role: activeTab };
+    const newUser: User = { ...formData as User, id, role: activeTab as Role };
     const collectionName = activeTab === 'TEACHER' ? 'teachers' : 'students';
     await setDoc(doc(db, collectionName, id), newUser);
     setIsAdding(false);
@@ -136,10 +126,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     setBulkData('');
   };
 
-  const handleDelete = async (user: User) => {
-    if (window.confirm(`Delete ${user.name}?`)) {
-      const collectionName = user.role === 'TEACHER' ? 'teachers' : 'students';
-      await deleteDoc(doc(db, collectionName, user.id));
+  const handleDelete = async (id: string, type: 'user' | 'class') => {
+    if (!window.confirm("Are you sure you want to delete this?")) return;
+    
+    if (type === 'class') {
+      await deleteDoc(doc(db, 'classes', id));
+    } else {
+      const collectionName = activeTab === 'TEACHER' ? 'teachers' : 'students';
+      await deleteDoc(doc(db, collectionName, id));
     }
   };
 
@@ -151,23 +145,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Admin Operations</p>
         </div>
         
-        {/* REPAIR BUTTON */}
-        {orphanClasses.length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl flex items-center gap-4 animate-pulse">
-            <div className="flex items-center gap-2 text-amber-700">
-              <AlertTriangle className="w-5 h-5" />
-              <span className="text-xs font-black uppercase tracking-widest">{orphanClasses.length} Unassigned Classes</span>
-            </div>
-            <button 
-              onClick={handleClaimOrphans}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2"
-            >
-              <Link className="w-3 h-3" />
-              {teacherFilter === 'ALL' ? 'Select Teacher First' : `Assign to Selected`}
-            </button>
-          </div>
-        )}
-
         <div className="flex items-center gap-4 p-3 rounded-2xl border bg-white border-slate-200 shadow-sm">
            <Filter className="w-5 h-5 text-slate-400" />
            <div className="flex flex-col">
@@ -184,6 +161,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
+      {/* STATS DASHBOARD */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard icon={BookOpen} label="Total Classes" value={stats.totalClasses} color="blue" />
         <StatCard icon={Users} label="Enrollments" value={stats.totalEnrollments} color="purple" />
@@ -191,20 +169,27 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <StatCard icon={GraduationCap} label="Unique Students" value={stats.uniqueCount} color="indigo" />
       </div>
 
+      {/* TAB NAVIGATION */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-slate-100 pt-10">
         <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
           <button onClick={() => setActiveTab('TEACHER')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
             <Briefcase className="w-4 h-4" /> Teachers
           </button>
+          <button onClick={() => setActiveTab('CLASSES')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'CLASSES' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
+            <BookOpen className="w-4 h-4" /> Classrooms
+          </button>
           <button onClick={() => setActiveTab('STUDENT')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'STUDENT' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
             <GraduationCap className="w-4 h-4" /> Students
           </button>
         </div>
+        
         <div className="flex gap-3">
           {activeTab === 'STUDENT' && (
             <button onClick={() => setIsBulkImporting(true)} className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"><Upload className="w-5 h-5" /> Bulk Import</button>
           )}
-          <button onClick={() => { setEditingUserId(null); setIsAdding(true); }} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"><Plus className="w-5 h-5" /> New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}</button>
+          {activeTab !== 'CLASSES' && (
+             <button onClick={() => { setEditingUserId(null); setIsAdding(true); }} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"><Plus className="w-5 h-5" /> New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}</button>
+          )}
         </div>
       </div>
 
@@ -213,15 +198,67 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <table className="w-full text-left">
             <thead className="bg-slate-50/50 border-b border-slate-200">
               <tr>
-                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Name</th>
-                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Username</th>
-                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Status</th>
+                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">
+                  {activeTab === 'CLASSES' ? 'Class Name' : 'Stakeholder'}
+                </th>
+                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">
+                  {activeTab === 'CLASSES' ? 'Schedule' : 'Access Node'}
+                </th>
+                <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">
+                  {activeTab === 'CLASSES' ? 'Assigned Teacher' : 'Status'}
+                </th>
                 {activeTab === 'STUDENT' && <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Form</th>}
                 <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {currentList.map(user => (
+              {/* RENDER CLASSES TAB */}
+              {activeTab === 'CLASSES' && (currentList as Class[]).map(cls => {
+                 const isOrphan = !teachers.find(t => t.id === cls.teacherId);
+                 return (
+                  <tr key={cls.id} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-8 py-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold bg-blue-100 text-blue-600 shadow-sm" style={{ backgroundColor: cls.themeColor, color: 'white' }}>
+                          {cls.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-800">{cls.name}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{(cls.enrolledStudentIds || []).length} Students</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-5">
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <Clock className="w-4 h-4 text-slate-400" />
+                        <span className="text-sm font-medium">{cls.classDay} @ {cls.classTime}</span>
+                      </div>
+                    </td>
+                    <td className="px-8 py-5">
+                      <div className={`flex items-center gap-2 p-1 pr-3 rounded-xl border ${isOrphan ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                         {isOrphan && <AlertTriangle className="w-4 h-4 text-amber-500 ml-2" />}
+                         <select 
+                           className={`bg-transparent outline-none text-xs font-bold py-1.5 px-2 w-full cursor-pointer ${isOrphan ? 'text-amber-700' : 'text-slate-700'}`}
+                           value={cls.teacherId || ''}
+                           onChange={(e) => handleAssignTeacher(cls.id, e.target.value)}
+                         >
+                           <option value="" disabled>Select Teacher...</option>
+                           {/* Add 't1' option temporarily if needed, or just list real teachers */}
+                           {teachers.map(t => (
+                             <option key={t.id} value={t.id}>{t.name}</option>
+                           ))}
+                         </select>
+                      </div>
+                    </td>
+                    <td className="px-8 py-5 text-right">
+                      <button onClick={() => handleDelete(cls.id, 'class')} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-5 h-5" /></button>
+                    </td>
+                  </tr>
+                 );
+              })}
+
+              {/* RENDER USERS TAB */}
+              {activeTab !== 'CLASSES' && (currentList as User[]).map(user => (
                 <tr key={user.id} className="hover:bg-slate-50/80 transition-colors group">
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-3">
@@ -237,11 +274,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                   <td className="px-8 py-5 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
                       <button onClick={() => handleEdit(user)} className="p-2 text-slate-400 hover:theme-primary hover:bg-slate-50 rounded-lg transition-all"><Edit className="w-5 h-5" /></button>
-                      <button onClick={() => handleDelete(user)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-5 h-5" /></button>
+                      <button onClick={() => handleDelete(user.id, 'user')} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-5 h-5" /></button>
                     </div>
                   </td>
                 </tr>
               ))}
+              
               {currentList.length === 0 && (
                 <tr><td colSpan={5} className="px-8 py-20 text-center"><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No matching records found.</p></td></tr>
               )}
@@ -254,23 +292,23 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-8">
-              <h2 className="text-2xl font-black text-slate-800">{editingUserId ? 'Edit Account' : 'New Account'}</h2>
+              <h2 className="text-2xl font-black text-slate-800">{editingUserId ? 'Modify Account' : 'Initialize Account'}</h2>
               <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
             <form onSubmit={handleSave} className="space-y-5">
               <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Name</label><input required placeholder="e.g. John Doe" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Username</label><input required className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
-                <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Password</label><input required={!editingUserId} type="password" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} /></div>
+                <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Username</label><input required placeholder="jdoe" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
+                <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Access Token</label><input required={!editingUserId} type="password" placeholder="••••••••" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} /></div>
               </div>
               {activeTab === 'STUDENT' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Age</label><input type="number" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.age} onChange={e => setFormData({...formData, age: parseInt(e.target.value)})} /></div>
-                  <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Standard</label><input className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.standard} onChange={e => setFormData({...formData, standard: e.target.value})} /></div>
+                  <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Form/Standard</label><input placeholder="e.g. 4A" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.standard} onChange={e => setFormData({...formData, standard: e.target.value})} /></div>
                 </div>
               )}
-              <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Employment Status</label><select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value as UserStatus})}><option value={UserStatus.ACTIVE}>Active Enrollment</option><option value={UserStatus.RESIGNED}>Inactive / Discharged</option></select></div>
-              <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 shadow-xl mt-6 transition-all active:scale-95">{editingUserId ? 'Update' : 'Create'}</button>
+              <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Status</label><select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value as UserStatus})}><option value={UserStatus.ACTIVE}>Active Enrollment</option><option value={UserStatus.RESIGNED}>Inactive / Discharged</option></select></div>
+              <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 shadow-xl mt-6 transition-all active:scale-95">{editingUserId ? 'Commit Changes' : 'Initialize Account'}</button>
             </form>
           </div>
         </div>
