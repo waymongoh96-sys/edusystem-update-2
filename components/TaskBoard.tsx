@@ -1,16 +1,16 @@
-
 import React, { useState } from 'react';
 import { Plus, X, Calendar, Edit2, ListChecks, CheckCircle2, Trash2 } from 'lucide-react';
-import { Task, TaskStatus, SystemSettings } from '../types';
+import { Task, TaskStatus, SystemSettings, User } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 interface TaskBoardProps {
   tasks: Task[];
   settings: SystemSettings;
+  currentUser: User | null; // <--- ADDED THIS
 }
 
-const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, settings }) => {
+const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, settings, currentUser }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Task>>({
@@ -25,10 +25,29 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, settings }) => {
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // SAFETY CHECK: Ensure we know who is creating the task
+    if (!currentUser) {
+      alert("Error: User not identified. Please reload.");
+      return;
+    }
+
     const taskId = editingTaskId || Date.now().toString();
-    const taskData: Task = { id: taskId, ...(formData as Task) };
-    await setDoc(doc(db, 'tasks', taskId), taskData);
-    closeModal();
+    
+    const taskData: Task = { 
+      id: taskId, 
+      ...(formData as Task),
+      // CRITICAL FIX: Stamp the task with the Creator's ID
+      userId: currentUser.id 
+    };
+
+    try {
+      await setDoc(doc(db, 'tasks', taskId), taskData);
+      closeModal();
+    } catch (error) {
+      console.error("Error saving task:", error);
+      alert("Failed to save task.");
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -46,6 +65,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, settings }) => {
   const moveTask = async (taskId: string, newStatus: TaskStatus) => {
     const task = tasks.find(t => t.id === taskId);
     if (task) {
+      // Persist the userId when moving, just in case
       await setDoc(doc(db, 'tasks', taskId), { ...task, status: newStatus });
     }
   };
