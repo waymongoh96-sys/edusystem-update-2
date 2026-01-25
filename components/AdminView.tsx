@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { User, UserStatus, Role, Class } from '../types';
-import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users, Edit, Filter } from 'lucide-react';
+import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users, Edit, Filter, ArrowRightLeft } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
 
 interface AdminViewProps {
   teachers: User[];
@@ -21,21 +21,23 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
 
-  // 1. STATS: RESPOND TO FILTER (This changes based on dropdown)
+  // 1. STATS: Safely Filtered
   const stats = useMemo(() => {
-    // FILTER LOGIC
+    // Helper to safely compare IDs (handles number vs string issues)
+    const matchesFilter = (tId: string) => String(tId) === String(teacherFilter);
+
     const filteredClasses = teacherFilter === 'ALL' 
       ? classes 
-      : classes.filter(c => String(c.teacherId) === String(teacherFilter)); // Safe String comparison
+      : classes.filter(c => matchesFilter(c.teacherId));
       
     const totalClasses = filteredClasses.length;
-    // Check both legacy and new student lists
+    
+    // Calculate Enrollments (Checking both Legacy and New fields)
     const totalEnrollments = filteredClasses.reduce((sum, cls) => {
       const ids = cls.enrolledStudentIds || (cls as any).studentIds || [];
       return sum + ids.length;
     }, 0);
     
-    // Unique count
     const uniqueStudentIds = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds || (c as any).studentIds || []));
     
     return { 
@@ -45,10 +47,51 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     };
   }, [classes, teacherFilter]);
 
-  // 2. TABLE LIST: IGNORE FILTER (Always show everyone)
+  // 2. TABLE LIST: NOW RESPONDS TO FILTER
   const currentList = useMemo(() => {
-    return activeTab === 'TEACHER' ? teachers : students;
-  }, [activeTab, teachers, students]);
+    // Case A: Show Teachers
+    if (activeTab === 'TEACHER') {
+      if (teacherFilter === 'ALL') return teachers;
+      return teachers.filter(t => String(t.id) === String(teacherFilter));
+    }
+
+    // Case B: Show Students
+    // If filtering by Teacher, show ONLY students enrolled in that teacher's classes
+    if (teacherFilter !== 'ALL') {
+      const teacherClassIds = classes
+        .filter(c => String(c.teacherId) === String(teacherFilter))
+        .map(c => c.id);
+        
+      // Find students who are in these classes
+      return students.filter(s => {
+        return classes.some(c => {
+          const ids = c.enrolledStudentIds || (c as any).studentIds || [];
+          return teacherClassIds.includes(c.id) && ids.includes(s.id);
+        });
+      });
+    }
+
+    return students;
+  }, [activeTab, teachers, students, teacherFilter, classes]);
+
+  // 3. REASSIGN TOOL (Fixes the "0 Stats" issue)
+  const handleReassignClasses = async (targetTeacherId: string) => {
+    if(!window.confirm("This will move ALL classes currently assigned to 't1' (orphans) to this teacher. Proceed?")) return;
+    
+    const orphanClasses = classes.filter(c => c.teacherId === 't1' || !c.teacherId);
+    if (orphanClasses.length === 0) {
+      alert("No orphan classes found to reassign.");
+      return;
+    }
+
+    const batch = writeBatch(db);
+    orphanClasses.forEach(cls => {
+      batch.update(doc(db, 'classes', cls.id), { teacherId: targetTeacherId });
+    });
+    
+    await batch.commit();
+    alert(`Successfully reassigned ${orphanClasses.length} classes.`);
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,12 +172,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      {/* Dynamic Stats Dashboard (AFFECTED BY FILTER) */}
+      {/* Dynamic Stats Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 theme-light-bg rounded-2xl mb-4 group-hover:scale-110 transition-transform"><BookOpen className="w-8 h-8 theme-primary" /></div>
           <h4 className="text-3xl font-black text-slate-800">{stats.totalClasses}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{teacherFilter === 'ALL' ? 'Total Classes' : 'Teacher\'s Classes'}</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+             {teacherFilter === 'ALL' ? 'Total Classes' : 'Teacher Classes'}
+          </p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-purple-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform"><Users className="w-8 h-8 text-purple-600" /></div>
@@ -144,7 +189,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-emerald-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform"><Briefcase className="w-8 h-8 text-emerald-600" /></div>
           <h4 className="text-3xl font-black text-slate-800">{teacherFilter === 'ALL' ? teachers.length : '1'}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Staff Count</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Active Staff</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-blue-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform"><GraduationCap className="w-8 h-8 text-blue-600" /></div>
@@ -170,7 +215,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      {/* TABLE: IGNORES FILTER (Always shows everyone) */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -199,6 +243,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                   {activeTab === 'STUDENT' && <td className="px-8 py-5"><p className="text-sm font-semibold text-slate-700">Form {user.standard}</p><p className="text-xs text-slate-500">{user.age} Years Old</p></td>}
                   <td className="px-8 py-5 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                       {/* NEW: Reassign Button for Teachers */}
+                       {activeTab === 'TEACHER' && (
+                         <button onClick={() => handleReassignClasses(user.id)} className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all" title="Claim 't1' Classes">
+                           <ArrowRightLeft className="w-5 h-5" />
+                         </button>
+                       )}
                       <button onClick={() => handleEdit(user)} className="p-2 text-slate-400 hover:theme-primary hover:bg-slate-50 rounded-lg transition-all"><Edit className="w-5 h-5" /></button>
                       <button onClick={() => handleDelete(user)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-5 h-5" /></button>
                     </div>
@@ -206,7 +256,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                 </tr>
               ))}
               {currentList.length === 0 && (
-                <tr><td colSpan={5} className="px-8 py-20 text-center"><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No accounts found.</p></td></tr>
+                <tr><td colSpan={5} className="px-8 py-20 text-center"><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No matching accounts found for this filter.</p></td></tr>
               )}
             </tbody>
           </table>
