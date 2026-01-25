@@ -50,47 +50,47 @@ const App: React.FC = () => {
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. IMPROVED ROLE DETECTION (Fixed "Teacher shows as Learner" bug)
+  // 1. NEW RULE-BASED ROLE DETECTION
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const email = firebaseUser.email || '';
-        let detectedRole: Role = 'STUDENT'; 
+        const email = (firebaseUser.email || '').toLowerCase();
+        const username = email.split('@')[0]; // Get part before @
+        
+        let detectedRole: Role = 'STUDENT'; // Default fallback
+
+        // --- STRICT CONVENTION RULES ---
+        if (username.includes('admin')) {
+          detectedRole = 'ADMIN';
+        } else if (username.endsWith('.teacher')) {
+          detectedRole = 'TEACHER';
+        } 
+        // If neither, they stay as STUDENT
+        
+        // Base User Data
         let userData: Partial<User> = {
           id: firebaseUser.uid,
-          name: firebaseUser.displayName || email.split('@')[0],
-          username: email.split('@')[0],
-          status: UserStatus.ACTIVE
+          name: firebaseUser.displayName || username,
+          username: username,
+          status: UserStatus.ACTIVE,
+          role: detectedRole
         };
 
-        // Priority check for Admin
-        if (email.toLowerCase().includes('admin')) {
-          detectedRole = 'ADMIN';
-        } else {
-          // Check Teachers Collection First
-          const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
-          if (teacherDoc.exists()) {
-            detectedRole = 'TEACHER';
-            userData = { ...userData, ...teacherDoc.data() };
-          } else {
-            // Check Students Collection
-            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
-            if (studentDoc.exists()) {
-              detectedRole = 'STUDENT';
-              userData = { ...userData, ...studentDoc.data() };
-            } 
-            // FIX: Restore Legacy Email Check if not found in DB
-            else if (email.toLowerCase().includes('teacher')) {
-              detectedRole = 'TEACHER';
-              // Optional: Auto-create the teacher profile here if you wanted
+        // Attempt to load extra profile data from DB if it exists
+        // (This preserves legacy data while respecting the new Rule)
+        try {
+          const collectionName = detectedRole === 'TEACHER' ? 'teachers' : (detectedRole === 'STUDENT' ? 'students' : null);
+          if (collectionName) {
+            const userDoc = await getDoc(doc(db, collectionName, firebaseUser.uid));
+            if (userDoc.exists()) {
+              userData = { ...userData, ...userDoc.data() };
             }
           }
+        } catch (e) {
+          console.log("Profile load error (harmless if new user):", e);
         }
 
-        setCurrentUser({
-          ...userData,
-          role: detectedRole
-        } as User);
+        setCurrentUser(userData as User);
       } else {
         setCurrentUser(null);
       }
@@ -127,7 +127,6 @@ const App: React.FC = () => {
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
       if (currentUser.role !== 'ADMIN') {
-        // Only show plans for visible classes
         const visibleClassIds = new Set(classes.map(c => c.id));
         setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
       } else {
@@ -135,7 +134,7 @@ const App: React.FC = () => {
       }
     });
 
-    // Subscriptions for shared data
+    // Shared Data Subscriptions
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
@@ -148,19 +147,17 @@ const App: React.FC = () => {
     };
   }, [currentUser, classes.length]); 
 
-  // 3. RECOVERY TOOL (Fixes "Data Not Found" for Teacher)
+  // 3. RECOVERY TOOL
   const handleRecoverLegacyData = async () => {
     if (!currentUser || currentUser.role !== 'TEACHER') return;
     setIsRecovering(true);
     try {
-      // Fetch ALL classes (ignoring the 'where' filter)
       const allSnapshot = await getDocs(collection(db, 'classes'));
       const updates = [];
       
       for (const docSnap of allSnapshot.docs) {
         const data = docSnap.data();
-        // If class has NO teacherId, or an invalid one, claim it for this teacher
-        // Note: This is a "Greedy" fix. It assumes if you are running this, you own the orphan data.
+        // Claim orphan classes
         if (!data.teacherId) {
           updates.push(updateDoc(doc(db, 'classes', docSnap.id), {
             teacherId: currentUser.id
@@ -169,10 +166,10 @@ const App: React.FC = () => {
       }
       
       await Promise.all(updates);
-      alert(`Recovered ${updates.length} legacy classes! You should see them now.`);
+      alert(`Recovered ${updates.length} legacy classes!`);
     } catch (error) {
       console.error("Recovery failed:", error);
-      alert("Error recovering data. See console.");
+      alert("Error recovering data.");
     } finally {
       setIsRecovering(false);
     }
@@ -211,7 +208,6 @@ const App: React.FC = () => {
   };
 
   const syncClassUpdate = async (updated: Class) => {
-    // Ensure the teacherId is preserved or set
     const classData = { ...updated, teacherId: currentUser?.role === 'TEACHER' ? currentUser.id : updated.teacherId };
     await setDoc(doc(db, 'classes', updated.id), classData);
   };
@@ -235,14 +231,13 @@ const App: React.FC = () => {
         case 'dashboard':
           return (
             <>
-              {/* RECOVERY BANNER: Only shows if teacher has 0 classes */}
               {classes.length === 0 && (
                 <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <AlertTriangle className="w-5 h-5 text-amber-600" />
                     <div>
-                      <p className="font-bold text-amber-900">Don't see your classes?</p>
-                      <p className="text-xs text-amber-700">Your old data might be missing an ID tag.</p>
+                      <p className="font-bold text-amber-900">No classes found?</p>
+                      <p className="text-xs text-amber-700">If you have old data, click here to recover it.</p>
                     </div>
                   </div>
                   <button 
@@ -251,7 +246,7 @@ const App: React.FC = () => {
                     className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors"
                   >
                     {isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    Recover Legacy Data
+                    Recover Data
                   </button>
                 </div>
               )}
