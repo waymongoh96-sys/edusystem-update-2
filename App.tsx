@@ -50,43 +50,52 @@ const App: React.FC = () => {
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. RULE-BASED ROLE DETECTION
+  // 1. INTELLIGENT ROLE & ID DETECTION (THE BRIDGE)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
         const username = email.split('@')[0];
+        console.log("Login attempt:", { email, username, uid: firebaseUser.uid });
         
-        let detectedRole: Role = 'STUDENT'; 
-
-        // STRICT CONVENTION RULES
-        if (username.includes('admin')) {
-          detectedRole = 'ADMIN';
-        } else if (username.endsWith('.teacher')) {
-          detectedRole = 'TEACHER';
-        } 
-        
-        let userData: Partial<User> = {
+        let finalUserData: User = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || username,
           username: username,
           status: UserStatus.ACTIVE,
-          role: detectedRole
+          role: 'STUDENT' // Default fallback
         };
 
-        try {
-          const collectionName = detectedRole === 'TEACHER' ? 'teachers' : (detectedRole === 'STUDENT' ? 'students' : null);
-          if (collectionName) {
-            const userDoc = await getDoc(doc(db, collectionName, firebaseUser.uid));
-            if (userDoc.exists()) {
-              userData = { ...userData, ...userDoc.data() };
+        if (username.includes('admin')) {
+          finalUserData.role = 'ADMIN';
+        } else {
+          // Check Teacher Collection
+          const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
+          if (teacherDoc.exists()) {
+             finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
+          } else {
+            // Check Student Collection
+            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
+            if (studentDoc.exists()) {
+               finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
+            } else {
+               // BRIDGE LOGIC: Find bulk imported accounts by username
+               console.log("Checking Bridge for username:", username);
+               const studentQuery = query(collection(db, 'students'), where('username', '==', username));
+               const studentSnap = await getDocs(studentQuery);
+               
+               if (!studentSnap.empty) {
+                 const match = studentSnap.docs[0];
+                 // Adopt the database ID (bulk-xxx) instead of the Google ID
+                 finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
+                 console.log("BRIDGE SUCCESS: Linked to", match.id);
+               } else if (username.endsWith('.teacher')) {
+                 finalUserData.role = 'TEACHER';
+               }
             }
           }
-        } catch (e) {
-          console.log("Profile load error (harmless if new user):", e);
         }
-
-        setCurrentUser(userData as User);
+        setCurrentUser(finalUserData as User);
       } else {
         setCurrentUser(null);
       }
@@ -95,46 +104,39 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. DATA ISOLATION LOGIC
+  // 2. DATA ISOLATION & SETTINGS
   useEffect(() => {
     if (!currentUser) return;
 
     let qClasses = query(collection(db, 'classes'));
     let qTasks = query(collection(db, 'tasks'));
     
-    // -- SCOPING RULES --
     if (currentUser.role === 'TEACHER') {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // Fetch ALL classes for students, then filter in memory to handle legacy/bulk IDs safely
+      // Student: Fetch ALL classes, filtering happens in memory below
       qClasses = query(collection(db, 'classes')); 
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
-
-      // FIX: Smart Filter for Students
+      // FIX: Smart Filter for Students (Checks both New and Legacy fields)
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
-          // Check New Field OR Old Field
           const enrolled = c.enrolledStudentIds || [];
           const legacy = (c as any).studentIds || []; 
           return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
         });
       }
-
       setClasses(loadedClasses);
     });
     
-    const unsubTasks = onSnapshot(qTasks, (snap) => {
-      setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
-    });
-
+    const unsubTasks = onSnapshot(qTasks, (snap) => setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))));
+    
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
-      // Filter strictly based on visible classes to prevent leaks
       if (currentUser.role !== 'ADMIN') {
         const visibleClassIds = new Set(classes.map(c => c.id));
         setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
@@ -143,21 +145,16 @@ const App: React.FC = () => {
       }
     });
 
-    // Subscriptions for shared data
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     
-    // --- SETTINGS ISOLATION FIX ---
-    // Instead of one global 'config/settings', we listen to 'user_settings/{userId}'
-    const unsubSettings = onSnapshot(doc(db, 'user_settings', currentUser.id), (snap) => { 
-      if (snap.exists()) {
-        setSettings(snap.data() as SystemSettings); 
-      } else {
-        // Fallback to defaults if new user
-        setSettings(INITIAL_SETTINGS);
-      }
+    // FIX: User-Specific Settings Listener
+    const settingsRef = doc(db, 'user_settings', currentUser.id);
+    const unsubSettings = onSnapshot(settingsRef, (snap) => { 
+      if (snap.exists()) setSettings(snap.data() as SystemSettings); 
+      else setSettings(INITIAL_SETTINGS);
     });
 
     return () => {
@@ -173,16 +170,13 @@ const App: React.FC = () => {
     try {
       const allSnapshot = await getDocs(collection(db, 'classes'));
       const updates = [];
-      
       for (const docSnap of allSnapshot.docs) {
         const data = docSnap.data();
-        if (!data.teacherId || data.teacherId === 't1') { 
-          updates.push(updateDoc(doc(db, 'classes', docSnap.id), {
-            teacherId: currentUser.id
-          }));
+        // Claim classes that have no teacher or are assigned to the ghost 't1'
+        if (!data.teacherId || data.teacherId === 't1') {
+          updates.push(updateDoc(doc(db, 'classes', docSnap.id), { teacherId: currentUser.id }));
         }
       }
-      
       await Promise.all(updates);
       alert(`Recovered ${updates.length} classes!`);
     } catch (error) {
@@ -194,55 +188,21 @@ const App: React.FC = () => {
   };
 
   const allTasks = useMemo(() => {
-    const autoTasks: Task[] = lessonPlans
-      .filter(lp => lp.status !== TaskStatus.COMPLETE)
-      .map(lp => {
+    const autoTasks: Task[] = lessonPlans.filter(lp => lp.status !== TaskStatus.COMPLETE).map(lp => {
         const cls = classes.find(c => c.id === lp.classId);
-        return {
-          id: `lp-${lp.classId}-${lp.id}`, 
-          name: `Prepare: ${cls?.name || 'Lesson'} (${lp.date})`,
-          dueDate: lp.date,
-          category: 'Preparation',
-          status: lp.status
-        };
+        return { id: `lp-${lp.classId}-${lp.id}`, name: `Prepare: ${cls?.name || 'Lesson'} (${lp.date})`, dueDate: lp.date, category: 'Preparation', status: lp.status };
       });
     return [...autoTasks, ...tasks];
   }, [lessonPlans, tasks, classes]);
 
   const primaryColor = useMemo(() => THEME_MAP[settings.themeColor] || THEME_MAP.blue, [settings.themeColor]);
-
-  const handleNavigateToClass = (classId: string) => {
-    setSelectedClassId(classId);
-    setActiveMenu('classes');
-  };
-
-  const handleNavigateToTasks = () => {
-    setActiveMenu('tasks');
-  };
-
-  const deleteLessonPlan = async (id: string) => {
-    await deleteDoc(doc(db, 'lessonPlans', id));
-  };
-
-  const syncClassUpdate = async (updated: Class) => {
-    const classData = { ...updated, teacherId: currentUser?.role === 'TEACHER' ? currentUser.id : updated.teacherId };
-    await setDoc(doc(db, 'classes', updated.id), classData);
-  };
-
   const handleLogout = () => signOut(auth);
 
   if (loading) return <div className="h-screen flex items-center justify-center font-black theme-primary">INITIALIZING EDUASSIST...</div>;
   if (!currentUser) return <Login />;
 
   const renderContent = () => {
-    if (currentUser.role === 'ADMIN') {
-      return <AdminView 
-        teachers={teachers}
-        students={students}
-        classes={classes}
-      />;
-    }
-
+    if (currentUser.role === 'ADMIN') return <AdminView teachers={teachers} students={students} classes={classes} />;
     if (currentUser.role === 'TEACHER') {
       switch (activeMenu) {
         case 'dashboard':
@@ -250,76 +210,25 @@ const App: React.FC = () => {
             <>
               {classes.length === 0 && (
                 <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600" />
-                    <div>
-                      <p className="font-bold text-amber-900">No classes found?</p>
-                      <p className="text-xs text-amber-700">If you have old data, click here to recover it.</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleRecoverLegacyData} 
-                    disabled={isRecovering}
-                    className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors"
-                  >
-                    {isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    Recover Data
-                  </button>
+                  <div className="flex items-center gap-3"><AlertTriangle className="w-5 h-5 text-amber-600" /><div><p className="font-bold text-amber-900">No classes found?</p><p className="text-xs text-amber-700">Old data might be unassigned.</p></div></div>
+                  <button onClick={handleRecoverLegacyData} disabled={isRecovering} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">{isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Recover Data</button>
                 </div>
               )}
-              <TeacherDashboard 
-                tasks={allTasks} classes={classes} 
-                lessonPlans={lessonPlans} settings={settings}
-                onClassClick={handleNavigateToClass}
-                onTaskClick={handleNavigateToTasks}
-                currentUser={currentUser} 
-              />
+              <TeacherDashboard tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} onClassClick={(id) => { setSelectedClassId(id); setActiveMenu('classes'); }} onTaskClick={() => setActiveMenu('tasks')} currentUser={currentUser} />
             </>
           );
         case 'classes':
           if (selectedClassId) {
             const cls = classes.find(c => c.id === selectedClassId);
-            return cls ? (
-              <ClassDetails 
-                cls={cls} students={students} lessonPlans={lessonPlans}
-                setLessonPlans={setLessonPlans} attendance={attendance}
-                setAttendance={setAttendance} settings={settings}
-                examResults={examResults} setExamResults={setExamResults}
-                onBack={() => setSelectedClassId(null)}
-                onDeletePlan={deleteLessonPlan}
-                updateClass={syncClassUpdate}
-                currentUser={currentUser} 
-              />
-            ) : null;
+            return cls ? <ClassDetails cls={cls} students={students} lessonPlans={lessonPlans} setLessonPlans={setLessonPlans} attendance={attendance} setAttendance={setAttendance} settings={settings} examResults={examResults} setExamResults={setExamResults} onBack={() => setSelectedClassId(null)} onDeletePlan={deleteLessonPlan} updateClass={syncClassUpdate} currentUser={currentUser} /> : null;
           }
-          return <ClassRegistry 
-            classes={classes} 
-            onSelectClass={setSelectedClassId} 
-            settings={settings}
-            lessonPlans={lessonPlans}
-            currentUser={currentUser} 
-          />;
-        case 'tasks':
-          return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
-        case 'settings':
-          // FIX: Pass currentUser so we save settings to the specific user's document
-          return <SettingsView settings={settings} currentUser={currentUser} />;
-        default:
-          return null;
+          return <ClassRegistry classes={classes} onSelectClass={setSelectedClassId} settings={settings} lessonPlans={lessonPlans} currentUser={currentUser} />;
+        case 'tasks': return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
+        case 'settings': return <SettingsView settings={settings} currentUser={currentUser} />;
+        default: return null;
       }
     }
-
-    if (currentUser.role === 'STUDENT') {
-      return (
-        <StudentDashboard 
-          student={currentUser} 
-          classes={classes} 
-          attendance={attendance} 
-          examResults={examResults} 
-        />
-      );
-    }
-
+    if (currentUser.role === 'STUDENT') return <StudentDashboard student={currentUser} classes={classes} attendance={attendance} examResults={examResults} />;
     return null;
   };
 
@@ -342,7 +251,7 @@ const App: React.FC = () => {
       <aside className={`bg-slate-900 text-white transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-24'} flex flex-col shrink-0`}>
         <div className="p-6 flex items-center gap-3">
           <div className="theme-bg p-2 rounded-xl shadow-lg shadow-blue-500/20">
-            < GraduationCap className="w-6 h-6 text-white" />
+            <GraduationCap className="w-6 h-6 text-white" />
           </div>
           {sidebarOpen && <span className="font-black text-xl tracking-tight uppercase">EduAssist</span>}
         </div>
@@ -395,6 +304,7 @@ const App: React.FC = () => {
   );
 };
 
+// --- RESTORED MENU ITEMS ---
 const menuItems = {
   ADMIN: [{ id: 'dashboard', icon: LayoutDashboard, label: 'Admin Hub' }],
   TEACHER: [
