@@ -106,8 +106,11 @@ const App: React.FC = () => {
     if (currentUser.role === 'TEACHER') {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
-    } else if (currentUser.role === 'STUDENT') {
-      qClasses = query(collection(db, 'classes'), where('studentIds', 'array-contains', currentUser.id));
+    // In App.tsx (inside the useEffect)
+
+} else if (currentUser.role === 'STUDENT') {  
+  // NEW (Fixed):
+  qClasses = query(collection(db, 'classes'), where('enrolledStudentIds', 'array-contains', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
