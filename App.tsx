@@ -102,38 +102,34 @@ const App: React.FC = () => {
     let qClasses = query(collection(db, 'classes'));
     let qTasks = query(collection(db, 'tasks'));
     
+// Inside App.tsx -> useEffect
+
     // -- SCOPING RULES --
     if (currentUser.role === 'TEACHER') {
-      // Teacher: Strict DB filtering (works fine because you are the creator)
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // Student: Fetch ALL classes, then filter in memory below
-      // This catches both 'studentIds' and 'enrolledStudentIds'
-      qClasses = query(collection(db, 'classes'));
-      
-      // Tasks are still strict
+      // FIX: Remove the 'where' clause here. Fetch ALL classes so we can check legacy fields manually.
+      qClasses = query(collection(db, 'classes')); 
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
 
-      // --- CRITICAL FIX FOR STUDENT VIEW ---
+      // FIX: Apply the "Smart Filter" here
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
-          // Check BOTH possible field names to find the student
+          // Check New Field OR Old Field
           const enrolled = c.enrolledStudentIds || [];
-          const legacy = (c as any).studentIds || []; // Checks for old data
-          
+          const legacy = (c as any).studentIds || []; 
           return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
         });
       }
-      // -------------------------------------
 
       setClasses(loadedClasses);
     });
-
+    
     const unsubTasks = onSnapshot(qTasks, (snap) => {
       setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
     });
