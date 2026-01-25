@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo } from 'react';
 import { User, UserStatus, Role, Class } from '../types';
-import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users, Edit, Filter } from 'lucide-react';
+import { Plus, Search, UserPlus, UserCheck, Trash2, X, Shield, GraduationCap, Briefcase, FileText, Upload, BookOpen, Layers, Users, Edit, Filter, RefreshCw } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
@@ -17,20 +16,25 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [isBulkImporting, setIsBulkImporting] = useState(false);
   const [bulkData, setBulkData] = useState('');
+  
+  // FIX 1: Filter State Default 'ALL'
   const [teacherFilter, setTeacherFilter] = useState('ALL');
+  
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
 
+  // FIX 2: Enhanced Stats Calculation
   const stats = useMemo(() => {
-    // If a teacher is selected, only show their specific data
-    const filteredClasses = teacherFilter === 'ALL' ? classes : classes.filter(c => c.teacherId === teacherFilter);
+    const filteredClasses = teacherFilter === 'ALL' 
+      ? classes 
+      : classes.filter(c => c.teacherId === teacherFilter);
+      
     const totalClasses = filteredClasses.length;
     
-    // Sum of all student spots filled across all filtered classes
+    // Safety Check: Ensure enrolledStudentIds exists before accessing .length
     const totalEnrollments = filteredClasses.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
     
-    // Count of distinct student IDs across all filtered classes
     const uniqueStudentIds = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds || []));
     
     return { 
@@ -112,14 +116,23 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     }
   };
 
-  // The list filter should probably reflect the teacher filter when on Students tab
+  // FIX 3: Correct Logic for List Filtering
   const currentList = useMemo(() => {
-    if (activeTab === 'TEACHER') return teachers;
-    if (teacherFilter === 'ALL') return students;
-    
-    const teacherClasses = classes.filter(c => c.teacherId === teacherFilter);
-    const studentIds = new Set(teacherClasses.flatMap(c => c.enrolledStudentIds || []));
-    return students.filter(s => studentIds.has(s.id));
+    // SCENARIO 1: No Filter Selected
+    if (teacherFilter === 'ALL') {
+      return activeTab === 'TEACHER' ? teachers : students;
+    }
+
+    // SCENARIO 2: Filter Selected
+    if (activeTab === 'TEACHER') {
+      // If filtering by Teacher A, only show Teacher A in the list
+      return teachers.filter(t => t.id === teacherFilter);
+    } else {
+      // If filtering by Teacher A, show STUDENTS linked to Teacher A's classes
+      const teacherClasses = classes.filter(c => c.teacherId === teacherFilter);
+      const studentIds = new Set(teacherClasses.flatMap(c => c.enrolledStudentIds || []));
+      return students.filter(s => studentIds.has(s.id));
+    }
   }, [activeTab, teachers, students, teacherFilter, classes]);
 
   return (
@@ -130,19 +143,26 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Admin Operations</p>
         </div>
         
-        <div className="flex items-center gap-4 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm">
-           <Filter className="w-5 h-5 text-slate-400" />
-           <div className="flex flex-col">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Perspective Filter</span>
-              <select 
-                className="bg-transparent border-none font-black text-xs text-slate-700 outline-none pr-8"
-                value={teacherFilter}
-                onChange={(e) => setTeacherFilter(e.target.value)}
-              >
-                 <option value="ALL">All Staff (Institutional Scope)</option>
-                 {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-           </div>
+        <div className="flex items-center gap-2">
+          {teacherFilter !== 'ALL' && (
+             <button onClick={() => setTeacherFilter('ALL')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title="Clear Filter">
+               <X className="w-5 h-5" />
+             </button>
+          )}
+          <div className={`flex items-center gap-4 p-3 rounded-2xl border shadow-sm transition-all ${teacherFilter !== 'ALL' ? 'bg-purple-50 border-purple-200 ring-2 ring-purple-100' : 'bg-white border-slate-200'}`}>
+             <Filter className={`w-5 h-5 ${teacherFilter !== 'ALL' ? 'text-purple-600' : 'text-slate-400'}`} />
+             <div className="flex flex-col">
+                <span className={`text-[8px] font-black uppercase tracking-widest ${teacherFilter !== 'ALL' ? 'text-purple-600' : 'text-slate-400'}`}>Perspective Filter</span>
+                <select 
+                  className="bg-transparent border-none font-black text-xs text-slate-700 outline-none pr-8 cursor-pointer"
+                  value={teacherFilter}
+                  onChange={(e) => setTeacherFilter(e.target.value)}
+                >
+                   <option value="ALL">All Staff (Institutional Scope)</option>
+                   {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+             </div>
+          </div>
         </div>
       </div>
 
@@ -278,7 +298,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
               {currentList.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-8 py-20 text-center">
-                    <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No accounts found in this registry scope.</p>
+                    <div className="flex flex-col items-center justify-center">
+                       <Filter className="w-12 h-12 text-slate-200 mb-4" />
+                       <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">
+                         {teacherFilter !== 'ALL' && activeTab === 'STUDENT' 
+                           ? "This teacher has no enrolled students yet."
+                           : "No accounts found in this registry scope."}
+                       </p>
+                    </div>
                   </td>
                 </tr>
               )}
