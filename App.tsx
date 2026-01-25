@@ -30,7 +30,6 @@ const THEME_MAP: Record<string, string> = {
 };
 
 const App: React.FC = () => {
-  // Global Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -46,47 +45,59 @@ const App: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
-  
-  // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. RULE-BASED ROLE DETECTION
+  // 1. INTELLIGENT ROLE & ID DETECTION
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
         const username = email.split('@')[0];
         
-        let detectedRole: Role = 'STUDENT'; 
-
-        // STRICT CONVENTION RULES
-        if (username.includes('admin')) {
-          detectedRole = 'ADMIN';
-        } else if (username.endsWith('.teacher')) {
-          detectedRole = 'TEACHER';
-        } 
-        
-        let userData: Partial<User> = {
-          id: firebaseUser.uid,
+        let finalUserData: User = {
+          id: firebaseUser.uid, // Default to Auth UID
           name: firebaseUser.displayName || username,
           username: username,
           status: UserStatus.ACTIVE,
-          role: detectedRole
+          role: 'STUDENT' // Default fallback
         };
 
-        try {
-          const collectionName = detectedRole === 'TEACHER' ? 'teachers' : (detectedRole === 'STUDENT' ? 'students' : null);
-          if (collectionName) {
-            const userDoc = await getDoc(doc(db, collectionName, firebaseUser.uid));
-            if (userDoc.exists()) {
-              userData = { ...userData, ...userDoc.data() };
+        // A. Check for ADMIN Override
+        if (username.includes('admin')) {
+          finalUserData.role = 'ADMIN';
+        } else {
+          // B. Check Database for Existing Profile (Teacher or Student)
+          // This "Link" step fixes the issue where Bulk Imported users couldn't see data
+          
+          // 1. Try finding exact ID match in Teachers
+          const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
+          
+          if (teacherDoc.exists()) {
+             finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
+          } else {
+            // 2. Try finding exact ID match in Students
+            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
+            
+            if (studentDoc.exists()) {
+               finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
+            } else {
+               // 3. "THE BRIDGE": Search by Username if ID mismatch (Fixes Bulk Import Issue)
+               // This finds the "bulk-1769..." document and adopts its ID
+               const studentQuery = query(collection(db, 'students'), where('username', '==', username));
+               const studentSnap = await getDocs(studentQuery);
+               
+               if (!studentSnap.empty) {
+                 const match = studentSnap.docs[0];
+                 finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
+                 console.log("Bridged Auth User to Database ID:", match.id);
+               } else if (username.endsWith('.teacher')) {
+                 finalUserData.role = 'TEACHER';
+               }
             }
           }
-        } catch (e) {
-          console.log("Profile load error (harmless if new user):", e);
         }
 
-        setCurrentUser(userData as User);
+        setCurrentUser(finalUserData as User);
       } else {
         setCurrentUser(null);
       }
@@ -95,21 +106,19 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-// 2. DATA ISOLATION LOGIC
+  // 2. DATA ISOLATION LOGIC
   useEffect(() => {
     if (!currentUser) return;
 
     let qClasses = query(collection(db, 'classes'));
     let qTasks = query(collection(db, 'tasks'));
     
-// Inside App.tsx -> useEffect
-
     // -- SCOPING RULES --
     if (currentUser.role === 'TEACHER') {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // FIX: Remove the 'where' clause here. Fetch ALL classes so we can check legacy fields manually.
+      // Fetch ALL classes for students, then filter in memory to handle legacy/bulk IDs safely
       qClasses = query(collection(db, 'classes')); 
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
@@ -117,12 +126,12 @@ const App: React.FC = () => {
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
 
-      // FIX: Apply the "Smart Filter" here
+      // FIX: Smart Filter for Students
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
-          // Check New Field OR Old Field
           const enrolled = c.enrolledStudentIds || [];
           const legacy = (c as any).studentIds || []; 
+          // Checks if either list contains the user's ID (which is now the bridged ID)
           return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
         });
       }
@@ -136,7 +145,6 @@ const App: React.FC = () => {
 
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
-      // Filter strictly based on visible classes to prevent leaks
       if (currentUser.role !== 'ADMIN') {
         const visibleClassIds = new Set(classes.map(c => c.id));
         setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
@@ -145,7 +153,6 @@ const App: React.FC = () => {
       }
     });
 
-    // Subscriptions for shared data
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
@@ -156,7 +163,7 @@ const App: React.FC = () => {
       unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); 
       unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
     };
-  }, [currentUser, classes.length]);
+  }, [currentUser, classes.length]); 
 
   // 3. RECOVERY TOOL
   const handleRecoverLegacyData = async () => {
@@ -168,7 +175,7 @@ const App: React.FC = () => {
       
       for (const docSnap of allSnapshot.docs) {
         const data = docSnap.data();
-        if (!data.teacherId) {
+        if (!data.teacherId || data.teacherId === 't1') { // Also recover hardcoded 't1' classes
           updates.push(updateDoc(doc(db, 'classes', docSnap.id), {
             teacherId: currentUser.id
           }));
@@ -176,7 +183,7 @@ const App: React.FC = () => {
       }
       
       await Promise.all(updates);
-      alert(`Recovered ${updates.length} legacy classes!`);
+      alert(`Recovered ${updates.length} classes!`);
     } catch (error) {
       console.error("Recovery failed:", error);
       alert("Error recovering data.");
@@ -246,7 +253,7 @@ const App: React.FC = () => {
                     <AlertTriangle className="w-5 h-5 text-amber-600" />
                     <div>
                       <p className="font-bold text-amber-900">No classes found?</p>
-                      <p className="text-xs text-amber-700">If you have old data, click here to recover it.</p>
+                      <p className="text-xs text-amber-700">If you see this, click Recover to claim your 't1' classes.</p>
                     </div>
                   </div>
                   <button 
@@ -264,7 +271,7 @@ const App: React.FC = () => {
                 lessonPlans={lessonPlans} settings={settings}
                 onClassClick={handleNavigateToClass}
                 onTaskClick={handleNavigateToTasks}
-                currentUser={currentUser} // PASSED HERE
+                currentUser={currentUser}
               />
             </>
           );
@@ -280,7 +287,7 @@ const App: React.FC = () => {
                 onBack={() => setSelectedClassId(null)}
                 onDeletePlan={deleteLessonPlan}
                 updateClass={syncClassUpdate}
-                currentUser={currentUser} // PASSED HERE
+                currentUser={currentUser} 
               />
             ) : null;
           }
@@ -289,10 +296,10 @@ const App: React.FC = () => {
             onSelectClass={setSelectedClassId} 
             settings={settings}
             lessonPlans={lessonPlans}
-            currentUser={currentUser} // PASSED HERE
+            currentUser={currentUser} 
           />;
         case 'tasks':
-          return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />; // PASSED HERE
+          return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
         case 'settings':
           return <SettingsView settings={settings} />;
         default:
