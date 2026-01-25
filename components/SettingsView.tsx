@@ -1,16 +1,16 @@
-
 import React, { useState } from 'react';
 import { Palette, ShieldAlert, Plus, Trash2, CheckCircle2, ListChecks, Calendar, Clock } from 'lucide-react';
-import { SystemSettings, Holiday } from '../types';
+import { SystemSettings, Holiday, User } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
 interface SettingsProps {
   settings: SystemSettings;
+  currentUser: User | null; // Added currentUser prop
 }
 
-const SettingsView: React.FC<SettingsProps> = ({ settings }) => {
+const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
   const [newHoliday, setNewHoliday] = useState({ date: '', description: '' });
   const [newLabel, setNewLabel] = useState({ key: '' as keyof SystemSettings, val: '' });
 
@@ -22,8 +22,10 @@ const SettingsView: React.FC<SettingsProps> = ({ settings }) => {
   ];
 
   const updateSettings = async (key: keyof SystemSettings, val: any) => {
+    if (!currentUser) return;
     const updated = { ...settings, [key]: val };
-    await setDoc(doc(db, 'config', 'settings'), updated);
+    // FIX: Save settings to 'user_settings' collection with the user's ID
+    await setDoc(doc(db, 'user_settings', currentUser.id), updated);
   };
 
   const addItem = (key: keyof SystemSettings) => {
