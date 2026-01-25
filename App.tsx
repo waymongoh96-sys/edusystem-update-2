@@ -50,13 +50,12 @@ const App: React.FC = () => {
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. INTELLIGENT ROLE & ID DETECTION (THE BRIDGE)
+  // 1. INTELLIGENT ROLE & ID DETECTION
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
         const username = email.split('@')[0];
-        console.log("Login attempt:", { email, username, uid: firebaseUser.uid });
         
         let finalUserData: User = {
           id: firebaseUser.uid,
@@ -69,26 +68,23 @@ const App: React.FC = () => {
         if (username.includes('admin')) {
           finalUserData.role = 'ADMIN';
         } else {
-          // Check Teacher Collection
+          // Check Teacher
           const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
           if (teacherDoc.exists()) {
              finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
           } else {
-            // Check Student Collection
+            // Check Student
             const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
             if (studentDoc.exists()) {
                finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
             } else {
-               // BRIDGE LOGIC: Find bulk imported accounts by username
-               console.log("Checking Bridge for username:", username);
+               // BRIDGE LOGIC: Link Google Login to Bulk Import ID
                const studentQuery = query(collection(db, 'students'), where('username', '==', username));
                const studentSnap = await getDocs(studentQuery);
                
                if (!studentSnap.empty) {
                  const match = studentSnap.docs[0];
-                 // Adopt the database ID (bulk-xxx) instead of the Google ID
                  finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
-                 console.log("BRIDGE SUCCESS: Linked to", match.id);
                } else if (username.endsWith('.teacher')) {
                  finalUserData.role = 'TEACHER';
                }
@@ -104,7 +100,7 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. DATA ISOLATION & SETTINGS
+  // 2. DATA ISOLATION
   useEffect(() => {
     if (!currentUser) return;
 
@@ -115,14 +111,14 @@ const App: React.FC = () => {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // Student: Fetch ALL classes, filtering happens in memory below
+      // Students fetch ALL classes to support both legacy and new ID formats
       qClasses = query(collection(db, 'classes')); 
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
-      // FIX: Smart Filter for Students (Checks both New and Legacy fields)
+      // Student Filter Logic
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
           const enrolled = c.enrolledStudentIds || [];
@@ -145,14 +141,12 @@ const App: React.FC = () => {
       }
     });
 
+    // Subscriptions
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
-    
-    // FIX: User-Specific Settings Listener
-    const settingsRef = doc(db, 'user_settings', currentUser.id);
-    const unsubSettings = onSnapshot(settingsRef, (snap) => { 
+    const unsubSettings = onSnapshot(doc(db, 'user_settings', currentUser.id), (snap) => { 
       if (snap.exists()) setSettings(snap.data() as SystemSettings); 
       else setSettings(INITIAL_SETTINGS);
     });
@@ -163,7 +157,12 @@ const App: React.FC = () => {
     };
   }, [currentUser, classes.length]); 
 
-  // 3. RECOVERY TOOL
+  // --- THIS FUNCTION WAS MISSING/CAUSING CRASH ---
+  const deleteLessonPlan = async (id: string) => {
+    await deleteDoc(doc(db, 'lessonPlans', id));
+  };
+  // -----------------------------------------------
+
   const handleRecoverLegacyData = async () => {
     if (!currentUser || currentUser.role !== 'TEACHER') return;
     setIsRecovering(true);
@@ -172,7 +171,6 @@ const App: React.FC = () => {
       const updates = [];
       for (const docSnap of allSnapshot.docs) {
         const data = docSnap.data();
-        // Claim classes that have no teacher or are assigned to the ghost 't1'
         if (!data.teacherId || data.teacherId === 't1') {
           updates.push(updateDoc(doc(db, 'classes', docSnap.id), { teacherId: currentUser.id }));
         }
@@ -197,12 +195,29 @@ const App: React.FC = () => {
 
   const primaryColor = useMemo(() => THEME_MAP[settings.themeColor] || THEME_MAP.blue, [settings.themeColor]);
   const handleLogout = () => signOut(auth);
+  
+  const handleNavigateToClass = (classId: string) => {
+    setSelectedClassId(classId);
+    setActiveMenu('classes');
+  };
+
+  const handleNavigateToTasks = () => {
+    setActiveMenu('tasks');
+  };
+
+  const syncClassUpdate = async (updated: Class) => {
+    const classData = { ...updated, teacherId: currentUser?.role === 'TEACHER' ? currentUser.id : updated.teacherId };
+    await setDoc(doc(db, 'classes', updated.id), classData);
+  };
 
   if (loading) return <div className="h-screen flex items-center justify-center font-black theme-primary">INITIALIZING EDUASSIST...</div>;
   if (!currentUser) return <Login />;
 
   const renderContent = () => {
-    if (currentUser.role === 'ADMIN') return <AdminView teachers={teachers} students={students} classes={classes} />;
+    if (currentUser.role === 'ADMIN') {
+      return <AdminView teachers={teachers} students={students} classes={classes} />;
+    }
+
     if (currentUser.role === 'TEACHER') {
       switch (activeMenu) {
         case 'dashboard':
@@ -214,15 +229,30 @@ const App: React.FC = () => {
                   <button onClick={handleRecoverLegacyData} disabled={isRecovering} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">{isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Recover Data</button>
                 </div>
               )}
-              <TeacherDashboard tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} onClassClick={(id) => { setSelectedClassId(id); setActiveMenu('classes'); }} onTaskClick={() => setActiveMenu('tasks')} currentUser={currentUser} />
+              <TeacherDashboard 
+                tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} 
+                onClassClick={handleNavigateToClass} onTaskClick={handleNavigateToTasks} currentUser={currentUser} 
+              />
             </>
           );
         case 'classes':
           if (selectedClassId) {
             const cls = classes.find(c => c.id === selectedClassId);
-            return cls ? <ClassDetails cls={cls} students={students} lessonPlans={lessonPlans} setLessonPlans={setLessonPlans} attendance={attendance} setAttendance={setAttendance} settings={settings} examResults={examResults} setExamResults={setExamResults} onBack={() => setSelectedClassId(null)} onDeletePlan={deleteLessonPlan} updateClass={syncClassUpdate} currentUser={currentUser} /> : null;
+            return cls ? (
+              <ClassDetails 
+                cls={cls} students={students} lessonPlans={lessonPlans}
+                setLessonPlans={setLessonPlans} attendance={attendance}
+                setAttendance={setAttendance} settings={settings}
+                examResults={examResults} setExamResults={setExamResults}
+                onBack={() => setSelectedClassId(null)}
+                // FIX: Ensure this function is passed correctly
+                onDeletePlan={deleteLessonPlan}
+                updateClass={syncClassUpdate}
+                currentUser={currentUser} 
+              />
+            ) : null;
           }
-          return <ClassRegistry classes={classes} onSelectClass={setSelectedClassId} settings={settings} lessonPlans={lessonPlans} currentUser={currentUser} />;
+          return <ClassRegistry classes={classes} onSelectClass={handleNavigateToClass} settings={settings} lessonPlans={lessonPlans} currentUser={currentUser} />;
         case 'tasks': return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
         case 'settings': return <SettingsView settings={settings} currentUser={currentUser} />;
         default: return null;
@@ -236,75 +266,30 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex bg-slate-50/50">
-      <style>{`
-        :root { 
-          --primary-color: ${primaryColor}; 
-          --primary-light: ${primaryColor}15; 
-        }
-        .theme-primary { color: var(--primary-color) !important; }
-        .theme-bg { background-color: var(--primary-color) !important; }
-        .theme-border { border-color: var(--primary-color) !important; }
-        .theme-ring { --tw-ring-color: var(--primary-color) !important; }
-        .theme-light-bg { background-color: var(--primary-light) !important; }
-      `}</style>
-
+      <style>{`:root { --primary-color: ${primaryColor}; --primary-light: ${primaryColor}15; } .theme-primary { color: var(--primary-color) !important; } .theme-bg { background-color: var(--primary-color) !important; } .theme-border { border-color: var(--primary-color) !important; } .theme-ring { --tw-ring-color: var(--primary-color) !important; } .theme-light-bg { background-color: var(--primary-light) !important; }`}</style>
       <aside className={`bg-slate-900 text-white transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-24'} flex flex-col shrink-0`}>
-        <div className="p-6 flex items-center gap-3">
-          <div className="theme-bg p-2 rounded-xl shadow-lg shadow-blue-500/20">
-            <GraduationCap className="w-6 h-6 text-white" />
-          </div>
-          {sidebarOpen && <span className="font-black text-xl tracking-tight uppercase">EduAssist</span>}
-        </div>
-
+        <div className="p-6 flex items-center gap-3"><div className="theme-bg p-2 rounded-xl shadow-lg shadow-blue-500/20"><GraduationCap className="w-6 h-6 text-white" /></div>{sidebarOpen && <span className="font-black text-xl tracking-tight uppercase">EduAssist</span>}</div>
         <nav className="flex-1 mt-10 px-4 space-y-2">
           {currentMenuItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => { setActiveMenu(item.id); setSelectedClassId(null); }}
-              className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${
-                activeMenu === item.id ? 'theme-bg text-white shadow-xl scale-105' : 'text-slate-500 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <item.icon className="w-6 h-6 shrink-0" />
-              {sidebarOpen && <span className="font-bold text-xs uppercase tracking-widest">{item.label}</span>}
-            </button>
+            <button key={item.id} onClick={() => { setActiveMenu(item.id); setSelectedClassId(null); }} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === item.id ? 'theme-bg text-white shadow-xl scale-105' : 'text-slate-500 hover:bg-slate-800 hover:text-white'}`}><item.icon className="w-6 h-6 shrink-0" />{sidebarOpen && <span className="font-bold text-xs uppercase tracking-widest">{item.label}</span>}</button>
           ))}
         </nav>
-
-        <div className="p-6 border-t border-slate-800">
-          <button onClick={handleLogout} className="flex items-center gap-4 p-4 text-slate-500 hover:text-red-400 rounded-2xl hover:bg-red-400/10 w-full transition-all">
-            <LogOut className="w-6 h-6 shrink-0" />
-            {sidebarOpen && <span className="font-bold text-xs uppercase tracking-widest">Logout</span>}
-          </button>
-        </div>
+        <div className="p-6 border-t border-slate-800"><button onClick={handleLogout} className="flex items-center gap-4 p-4 text-slate-500 hover:text-red-400 rounded-2xl hover:bg-red-400/10 w-full transition-all"><LogOut className="w-6 h-6 shrink-0" />{sidebarOpen && <span className="font-bold text-xs uppercase tracking-widest">Logout</span>}</button></div>
       </aside>
-
       <main className="flex-1 overflow-auto">
         <header className="bg-white/80 backdrop-blur-md h-20 border-b border-slate-200 flex items-center justify-between px-10 sticky top-0 z-10">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2.5 hover:bg-slate-100 rounded-xl">
-            <Menu className="w-6 h-6 text-slate-600" />
-          </button>
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2.5 hover:bg-slate-100 rounded-xl"><Menu className="w-6 h-6 text-slate-600" /></button>
           <div className="flex items-center gap-6">
-            <div className="text-right">
-              <p className="text-sm font-black text-slate-800">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-              <p className="text-[10px] font-black theme-primary uppercase tracking-widest">@{currentUser.username}</p>
-            </div>
-            <div className="h-10 w-px bg-slate-200" />
-            <div className="px-5 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border theme-border theme-primary theme-light-bg">
-              {currentUser.role}
-            </div>
+            <div className="text-right"><p className="text-sm font-black text-slate-800">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p><p className="text-[10px] font-black theme-primary uppercase tracking-widest">@{currentUser.username}</p></div>
+            <div className="h-10 w-px bg-slate-200" /><div className="px-5 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border theme-border theme-primary theme-light-bg">{currentUser.role}</div>
           </div>
         </header>
-
-        <div className="p-10 max-w-[1600px] mx-auto w-full">
-          {renderContent()}
-        </div>
+        <div className="p-10 max-w-[1600px] mx-auto w-full">{renderContent()}</div>
       </main>
     </div>
   );
 };
 
-// --- RESTORED MENU ITEMS ---
 const menuItems = {
   ADMIN: [{ id: 'dashboard', icon: LayoutDashboard, label: 'Admin Hub' }],
   TEACHER: [
