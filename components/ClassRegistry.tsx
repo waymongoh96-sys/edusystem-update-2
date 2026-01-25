@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Plus, Clock, Calendar, Users, X, BookOpen, ChevronRight, CheckCircle2, Edit2, Trash2, Palette, GripVertical } from 'lucide-react';
-import { Class, SystemSettings, LessonPlan, TaskStatus, User } from '../types';
+import { Class, SystemSettings, LessonPlan, TaskStatus } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -11,11 +11,10 @@ interface ClassRegistryProps {
   onSelectClass: (id: string) => void;
   settings: SystemSettings;
   lessonPlans: LessonPlan[];
-  currentUser: User;
 }
 
 const ClassRegistry: React.FC<ClassRegistryProps> = ({ 
-  classes, onSelectClass, settings, lessonPlans, currentUser
+  classes, onSelectClass, settings, lessonPlans 
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
@@ -104,7 +103,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
     const classData: Class = {
       id: classId,
       ...formData,
-      teacherId: currentUser.id, 
+      teacherId: 't1', 
       enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : [],
       order: editingClass?.order ?? classes.length
     };
@@ -137,6 +136,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
     const [removed] = reordered.splice(oldIndex, 1);
     reordered.splice(newIndex, 0, removed);
 
+    // Persist new order to Firestore using batch
     const batch = writeBatch(db);
     reordered.forEach((cls, idx) => {
       const ref = doc(db, 'classes', cls.id);
@@ -258,7 +258,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Time</label>
-                  <input type="time" className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={formData.classTime} onChange={e => setFormData({...formData, classTime: e.target.value})} />
+                  <input type="time" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none" value={formData.classTime} onChange={e => setFormData({...formData, classTime: e.target.value})} />
                 </div>
               </div>
               <div className="space-y-2">
