@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo } from 'react';
 import { Plus, Clock, Calendar, Users, X, BookOpen, ChevronRight, CheckCircle2, Edit2, Trash2, Palette, GripVertical } from 'lucide-react';
-import { Class, SystemSettings, LessonPlan, TaskStatus } from '../types';
+import { Class, SystemSettings, LessonPlan, TaskStatus, User } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -11,10 +10,11 @@ interface ClassRegistryProps {
   onSelectClass: (id: string) => void;
   settings: SystemSettings;
   lessonPlans: LessonPlan[];
+  currentUser: User | null; // <--- ADDED THIS to receive the logged-in user
 }
 
 const ClassRegistry: React.FC<ClassRegistryProps> = ({ 
-  classes, onSelectClass, settings, lessonPlans 
+  classes, onSelectClass, settings, lessonPlans, currentUser // <--- DESTRUCTURED HERE
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
@@ -99,11 +99,20 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
 
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Safety check: Ensure we have a valid user ID to attach to this class
+    const ownerId = currentUser?.id;
+    if (!ownerId) {
+      alert("Error: Cannot identify teacher. Please log in again.");
+      return;
+    }
+
     const classId = editingClass ? editingClass.id : Date.now().toString();
     const classData: Class = {
       id: classId,
       ...formData,
-      teacherId: 't1', 
+      // CRITICAL FIX: Use the logged-in user's ID, not 't1'
+      teacherId: editingClass ? editingClass.teacherId : ownerId, 
       enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : [],
       order: editingClass?.order ?? classes.length
     };
