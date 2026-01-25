@@ -10,11 +10,11 @@ interface ClassRegistryProps {
   onSelectClass: (id: string) => void;
   settings: SystemSettings;
   lessonPlans: LessonPlan[];
-  currentUser: User | null; // Added prop
+  currentUser: User | null; // <--- 1. ADDED THIS
 }
 
 const ClassRegistry: React.FC<ClassRegistryProps> = ({ 
-  classes, onSelectClass, settings, lessonPlans, currentUser 
+  classes, onSelectClass, settings, lessonPlans, currentUser // <--- 2. DESTRUCTURED THIS
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
@@ -100,16 +100,17 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // SAFETY CHECK: Ensure we have a valid user
     if (!currentUser) {
-       alert("Error: No user logged in.");
-       return;
+      alert("Error: You must be logged in to create a class.");
+      return;
     }
 
     const classId = editingClass ? editingClass.id : Date.now().toString();
     const classData: Class = {
       id: classId,
       ...formData,
-      // CRITICAL FIX: Use the REAL user ID, not 't1'
+      // 3. CRITICAL FIX: Use the REAL User ID, not 't1'
       teacherId: editingClass ? editingClass.teacherId : currentUser.id, 
       enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : [],
       order: editingClass?.order ?? classes.length
@@ -121,7 +122,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
       setEditingClass(null);
     } catch (err) {
       console.error("Save failed:", err);
-      alert("Failed to save data.");
+      alert("Failed to save data. Please check your Firestore Security Rules.");
     }
   };
 
@@ -143,6 +144,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
     const [removed] = reordered.splice(oldIndex, 1);
     reordered.splice(newIndex, 0, removed);
 
+    // Persist new order to Firestore using batch
     const batch = writeBatch(db);
     reordered.forEach((cls, idx) => {
       const ref = doc(db, 'classes', cls.id);
