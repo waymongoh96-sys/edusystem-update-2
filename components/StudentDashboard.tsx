@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { 
   GraduationCap, BookOpen, Calendar, Clock, TrendingUp, 
@@ -18,7 +17,16 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
   student, classes, attendance, examResults 
 }) => {
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-  const enrolledClasses = useMemo(() => classes.filter(c => c.enrolledStudentIds.includes(student.id)), [classes, student.id]);
+
+  // FIX: Updated logic to check BOTH new and legacy fields
+  const enrolledClasses = useMemo(() => {
+    return classes.filter(c => {
+      // 1. Get the list (handle new field, old field, or empty)
+      const ids = c.enrolledStudentIds || (c as any).studentIds || [];
+      // 2. Safely check if student is included
+      return Array.isArray(ids) && ids.includes(student.id);
+    });
+  }, [classes, student.id]);
 
   if (selectedClassId) {
     const cls = enrolledClasses.find(c => c.id === selectedClassId);
@@ -99,10 +107,10 @@ const StudentClassView: React.FC<{
   const generateAIComment = async () => {
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY_HERE" }); // Ensure this is safe or from env
       const notes = attendance.map(a => `${a.date}: ${a.performanceComment}`).filter(n => n.length > 10).join('\n');
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         contents: `Act as a supportive academic mentor. Based on these teacher notes for student ${student.name} in class ${cls.name}, provide a supportive 2-sentence summary of their performance and one encouraging tip for next month. 
         Teacher's Notes:
         ${notes || "The student has been attending class regularly and participating well."}`,
