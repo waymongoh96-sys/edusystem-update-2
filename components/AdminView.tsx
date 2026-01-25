@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { User, UserStatus, Class, Role } from '../types';
 import { 
   Plus, Users, Edit, Filter, Trash2, BookOpen, 
-  Briefcase, GraduationCap, AlertTriangle, Clock, Upload, X
+  Briefcase, GraduationCap, AlertTriangle, Clock, Upload, X, Link 
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
@@ -14,7 +14,6 @@ interface AdminViewProps {
 }
 
 const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) => {
-  // Tabs: TEACHER, STUDENT, or CLASSES (New)
   const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT' | 'CLASSES'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -25,16 +24,30 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
 
-  // --- 1. LIVE DASHBOARD STATS ---
+  // --- 1. SMART DASHBOARD STATS (The Fix) ---
   const stats = useMemo(() => {
-    // Filter classes based on the Dropdown Selection
-    const filteredClasses = teacherFilter === 'ALL' 
-      ? classes 
-      : classes.filter(c => String(c.teacherId) === String(teacherFilter));
+    let filteredClasses = classes;
+
+    if (teacherFilter !== 'ALL') {
+      // Find the actual teacher object based on the selection
+      const targetTeacher = teachers.find(t => t.id === teacherFilter);
+      
+      if (targetTeacher) {
+        // SMART MATCH: Check ID, Username, OR Name
+        filteredClasses = classes.filter(c => 
+          String(c.teacherId) === String(targetTeacher.id) || 
+          c.teacherId === targetTeacher.username || 
+          c.teacherId === targetTeacher.name
+        );
+      } else {
+        // Fallback: Strict ID match
+        filteredClasses = classes.filter(c => String(c.teacherId) === String(teacherFilter));
+      }
+    }
       
     const totalClasses = filteredClasses.length;
     
-    // Count Total Students in these classes
+    // Count Enrollments
     const totalEnrollments = filteredClasses.reduce((sum, cls) => {
       const ids = cls.enrolledStudentIds || (cls as any).studentIds || [];
       return sum + ids.length;
@@ -48,34 +61,48 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
       totalEnrollments, 
       uniqueCount: uniqueStudentIds.size 
     };
-  }, [classes, teacherFilter]);
+  }, [classes, teacherFilter, teachers]);
 
   // --- 2. TABLE DATA LOGIC ---
   const currentList = useMemo(() => {
-    // A. CLASSES TAB: Show Class List (Filtered)
+    // CLASSES TAB
     if (activeTab === 'CLASSES') {
       if (teacherFilter === 'ALL') return classes;
+      const targetTeacher = teachers.find(t => t.id === teacherFilter);
+      if (targetTeacher) {
+        return classes.filter(c => 
+          String(c.teacherId) === String(targetTeacher.id) || 
+          c.teacherId === targetTeacher.username ||
+          c.teacherId === targetTeacher.name
+        );
+      }
       return classes.filter(c => String(c.teacherId) === String(teacherFilter));
     }
 
-    // B. TEACHERS TAB: Show Teachers (Filtered)
+    // TEACHERS TAB
     if (activeTab === 'TEACHER') {
       if (teacherFilter === 'ALL') return teachers;
       return teachers.filter(t => String(t.id) === String(teacherFilter));
     }
 
-    // C. STUDENTS TAB: Show Students
+    // STUDENTS TAB
     if (activeTab === 'STUDENT') {
-      // If filtering by Teacher, show ONLY students in that Teacher's classes
       if (teacherFilter !== 'ALL') {
+        // Get IDs of all classes belonging to this teacher (using Smart Match)
+        const targetTeacher = teachers.find(t => t.id === teacherFilter);
         const teacherClassIds = classes
-          .filter(c => String(c.teacherId) === String(teacherFilter))
+          .filter(c => 
+            targetTeacher ? (
+              String(c.teacherId) === String(targetTeacher.id) || 
+              c.teacherId === targetTeacher.username ||
+              c.teacherId === targetTeacher.name
+            ) : String(c.teacherId) === String(teacherFilter)
+          )
           .map(c => c.id);
           
         return students.filter(s => {
           return classes.some(c => {
             const ids = c.enrolledStudentIds || (c as any).studentIds || [];
-            // Check if student is in one of the teacher's classes
             return teacherClassIds.includes(c.id) && ids.includes(s.id);
           });
         });
@@ -87,23 +114,18 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   // --- ACTIONS ---
 
-  // INDIVIDUAL ASSIGNMENT: The "Magic" Fix
   const handleAssignTeacher = async (classId: string, newTeacherId: string) => {
     try {
-      await updateDoc(doc(db, 'classes', classId), {
-        teacherId: newTeacherId
-      });
-      // The UI will update automatically because of the real-time listener in App.tsx
+      await updateDoc(doc(db, 'classes', classId), { teacherId: newTeacherId });
     } catch (error) {
       console.error("Assignment failed:", error);
-      alert("Failed to assign teacher. Check console.");
+      alert("Failed to assign teacher.");
     }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = editingUserId || Date.now().toString();
-    // Ensure role matches the active tab
     const role = activeTab === 'TEACHER' ? 'TEACHER' : 'STUDENT'; 
     const newUser: User = { ...formData as User, id, role: role as Role };
     const collectionName = role === 'TEACHER' ? 'teachers' : 'students';
@@ -146,7 +168,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   const handleDelete = async (id: string, type: 'user' | 'class') => {
     if (!window.confirm("Are you sure you want to delete this?")) return;
-    
     if (type === 'class') {
       await deleteDoc(doc(db, 'classes', id));
     } else {
@@ -163,7 +184,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   return (
     <div className="space-y-10">
-      {/* 1. HEADER & FILTER */}
+      {/* HEADER & FILTER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">Institutional Terminal</h1>
@@ -173,7 +194,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <div className="flex items-center gap-4 p-3 rounded-2xl border bg-white border-slate-200 shadow-sm">
            <Filter className="w-5 h-5 text-slate-400" />
            <div className="flex flex-col">
-              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Filter Dashboard By</span>
+              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">Smart Filter</span>
               <select 
                 className="bg-transparent border-none font-black text-xs text-slate-700 outline-none pr-8 cursor-pointer"
                 value={teacherFilter}
@@ -186,7 +207,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      {/* 2. STATS CARDS (Dynamic based on Filter) */}
+      {/* STATS CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard icon={BookOpen} label="Total Classes" value={stats.totalClasses} color="blue" />
         <StatCard icon={Users} label="Enrollments" value={stats.totalEnrollments} color="purple" />
@@ -194,7 +215,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <StatCard icon={GraduationCap} label="Unique Students" value={stats.uniqueCount} color="indigo" />
       </div>
 
-      {/* 3. TABS NAVIGATION */}
+      {/* TABS & ACTIONS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-slate-100 pt-10">
         <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
           <button onClick={() => setActiveTab('TEACHER')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -209,9 +230,9 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
         
         <div className="flex gap-3">
-          {/* Recovery Button for Deleted Data */}
+          {/* Recovery Button */}
           {activeTab === 'STUDENT' && (
-            <button onClick={() => setIsBulkImporting(true)} className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"><Upload className="w-5 h-5" /> Restore Students</button>
+            <button onClick={() => setIsBulkImporting(true)} className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"><Upload className="w-5 h-5" /> Restore Registry</button>
           )}
           {activeTab !== 'CLASSES' && (
              <button onClick={() => { setEditingUserId(null); setIsAdding(true); }} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"><Plus className="w-5 h-5" /> New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}</button>
@@ -219,7 +240,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      {/* 4. MAIN DATA TABLE */}
+      {/* MAIN DATA TABLE */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -232,7 +253,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                   {activeTab === 'CLASSES' ? 'Schedule' : 'ID / Username'}
                 </th>
                 <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">
-                  {activeTab === 'CLASSES' ? 'Assigned Teacher (Owner)' : 'Status'}
+                  {activeTab === 'CLASSES' ? 'Assigned Teacher' : 'Status'}
                 </th>
                 {activeTab === 'STUDENT' && <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Form</th>}
                 <th className="px-8 py-5 font-bold text-slate-600 text-xs uppercase tracking-wider text-right">Actions</th>
@@ -240,7 +261,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
             </thead>
             <tbody className="divide-y divide-slate-100">
               
-              {/* --- VIEW: CLASSROOM MANAGER --- */}
+              {/* --- VIEW: CLASSROOMS --- */}
               {activeTab === 'CLASSES' && (currentList as Class[]).map(cls => {
                  // Check if teacher exists (Blue) or is orphan (Orange)
                  const teacherExists = teachers.find(t => t.id === cls.teacherId);
@@ -275,7 +296,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                          >
                            <option value="" disabled>Unassigned / Select...</option>
                            {teachers.map(t => (
-                             <option key={t.id} value={t.id}>{t.name}</option>
+                             <option key={t.id} value={t.id}>{t.name} (@{t.username})</option>
                            ))}
                          </select>
                       </div>
@@ -287,7 +308,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                  );
               })}
 
-              {/* --- VIEW: USERS (Teacher/Student) --- */}
+              {/* --- VIEW: USERS --- */}
               {activeTab !== 'CLASSES' && (currentList as User[]).map(user => (
                 <tr key={user.id} className="hover:bg-slate-50/80 transition-colors group">
                   <td className="px-8 py-5">
@@ -311,14 +332,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
               ))}
               
               {currentList.length === 0 && (
-                <tr><td colSpan={5} className="px-8 py-20 text-center"><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No data found in this category.</p></td></tr>
+                <tr><td colSpan={5} className="px-8 py-20 text-center"><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No matching records found.</p></td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* MODALS */}
+      {/* ADD/EDIT MODAL */}
       {isAdding && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
@@ -339,27 +360,32 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                 </div>
               )}
               <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Status</label><select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value as UserStatus})}><option value={UserStatus.ACTIVE}>Active Enrollment</option><option value={UserStatus.RESIGNED}>Inactive / Discharged</option></select></div>
-              <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 shadow-xl mt-6 transition-all active:scale-95">{editingUserId ? 'Update' : 'Create'}</button>
+              <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 shadow-xl mt-6 transition-all active:scale-95">{editingUserId ? 'Commit Changes' : 'Initialize Account'}</button>
             </form>
           </div>
         </div>
       )}
 
+      {/* BULK RESTORE MODAL */}
       {isBulkImporting && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-black text-slate-800">Recover Data</h2>
+              <h2 className="text-2xl font-black text-slate-800">Restore Registry</h2>
               <button onClick={() => setIsBulkImporting(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
-            <p className="text-sm text-slate-500 mb-4">Paste your CSV data here (Name, Username, Age, Form) to restore your student registry.</p>
+            <p className="text-sm text-slate-500 mb-4 font-medium">Paste your backup data here to recover the student list.</p>
+            <div className="bg-slate-50 p-3 rounded-xl mb-4 border border-slate-200">
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Format</p>
+               <p className="text-xs font-mono text-slate-600">Name, Username, Age, Form</p>
+            </div>
             <textarea 
-              className="w-full h-40 p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-mono text-xs" 
-              placeholder="Alice, alice123, 12, 6A&#10;Bob, bob123, 11, 5B"
+              className="w-full h-40 p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-mono text-xs focus:ring-4 focus:ring-purple-100 transition-all" 
+              placeholder="Alice Smith, alice, 12, 6A&#10;Bob Jones, bob123, 11, 5B"
               value={bulkData}
               onChange={e => setBulkData(e.target.value)}
             />
-            <button onClick={handleBulkImport} className="w-full mt-6 bg-purple-600 text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-purple-700 transition-all">Execute Recovery</button>
+            <button onClick={handleBulkImport} className="w-full mt-6 bg-purple-600 text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-purple-700 transition-all shadow-lg shadow-purple-100">Execute Recovery</button>
           </div>
         </div>
       )}
@@ -367,6 +393,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   );
 };
 
+// Helper Stat Card
 const StatCard = ({ icon: Icon, label, value, color }: any) => (
   <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:border-slate-300 transition-all">
     <div className={`p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform bg-${color}-50 text-${color}-600`}>
