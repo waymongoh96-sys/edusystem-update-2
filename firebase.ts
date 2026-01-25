@@ -5,13 +5,13 @@ import { getFirestore } from 'firebase/firestore';
 
 // Replace with your actual Firebase project configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBGj8TirBAkQL9NpHHBa1QDQesis-SOIus",
-  authDomain: "edusystem-4df07.firebaseapp.com",
-  projectId: "edusystem-4df07",
-  storageBucket: "edusystem-4df07.firebasestorage.app",
-  messagingSenderId: "748439452487",
-  appId: "1:748439452487:web:afa13e290fc8f3f4f36a62",
-  measurementId: "G-7089RPPBV5"
+  apiKey: "AIzaSyAn38XpRN9Zwrn8hT6dNzfD-iiVOlMQxSA",
+  authDomain: "edusystem-2.firebaseapp.com",
+  projectId: "edusystem-2",
+  storageBucket: "edusystem-2.firebasestorage.app",
+  messagingSenderId: "545484348767",
+  appId: "1:545484348767:web:13fd9ebb8141fa3a42eaea",
+  measurementId: "G-G1KCFCWG9L"
 };
 
 const app = initializeApp(firebaseConfig);
