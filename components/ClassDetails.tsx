@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   ChevronLeft, Plus, Edit, FileText, CheckCircle2, Clock, Trash2, 
@@ -24,10 +23,12 @@ interface ClassDetailsProps {
   onBack: () => void;
   onDeletePlan: (id: string) => void;
   updateClass: (cls: Class | any) => void;
+  currentUser: User | null; // <--- ADDED THIS
 }
 
 const ClassDetails: React.FC<ClassDetailsProps> = ({ 
-  cls, students, lessonPlans, setLessonPlans, attendance, setAttendance, examResults, setExamResults, settings, onBack, onDeletePlan, updateClass 
+  cls, students, lessonPlans, setLessonPlans, attendance, setAttendance, 
+  examResults, setExamResults, settings, onBack, onDeletePlan, updateClass, currentUser 
 }) => {
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [showEnrolModal, setShowEnrolModal] = useState(false);
@@ -41,9 +42,12 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [examColumns, setExamColumns] = useState(['Mid-Term', 'Final Exam']);
   const [selectedGraphExam, setSelectedGraphExam] = useState(examColumns[0]);
 
+  // Safety check: Ensure the array exists before filtering
+  const currentEnrolledIds = cls.enrolledStudentIds || [];
+
   const enrolledStudents = useMemo(() => 
-    students.filter(s => cls.enrolledStudentIds.includes(s.id)), 
-    [students, cls.enrolledStudentIds]
+    students.filter(s => currentEnrolledIds.includes(s.id)), 
+    [students, currentEnrolledIds]
   );
 
   const availableStandards = useMemo(() => {
@@ -106,7 +110,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    // Toggle behavior: if the same status is clicked, delete the record (undo)
     if (existing?.status === status) {
       try {
         await deleteDoc(doc(db, 'attendance', recordId));
@@ -160,22 +163,38 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     await setDoc(doc(db, 'examResults', examId), record);
   };
 
+  // --- CRITICAL FIX: Enhanced Enrollment Logic ---
   const handleEnroll = (studentId: string) => {
-    if (!cls.enrolledStudentIds.includes(studentId)) {
-      const updatedClass = { ...cls, enrolledStudentIds: [...cls.enrolledStudentIds, studentId] };
+    const currentList = cls.enrolledStudentIds || [];
+    if (!currentList.includes(studentId)) {
+      const newList = [...currentList, studentId];
+      
+      const updatedClass = { 
+        ...cls, 
+        // 1. Update the correct field
+        enrolledStudentIds: newList,
+        // 2. Also update the legacy field to ensure compatibility with old data readers
+        studentIds: newList 
+      };
+      
       updateClass(updatedClass);
     }
   };
 
   const handleRemoveStudent = (studentId: string) => {
-    if (window.confirm("Remove this student from the class? This action will not delete the student account itself.")) {
+    if (window.confirm("Remove this student from the class?")) {
+      const currentList = cls.enrolledStudentIds || [];
+      const newList = currentList.filter(id => id !== studentId);
+      
       const updatedClass = {
         ...cls,
-        enrolledStudentIds: cls.enrolledStudentIds.filter(id => id !== studentId)
+        enrolledStudentIds: newList,
+        studentIds: newList // Keep sync
       };
       updateClass(updatedClass);
     }
   };
+  // ------------------------------------------------
 
   const analyticsData = useMemo(() => {
     const data = enrolledStudents.map(s => {
@@ -526,7 +545,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             <div className="flex-1 overflow-y-auto space-y-3 pr-4 custom-scrollbar">
               {students
                 .filter(s => 
-                  !cls.enrolledStudentIds.includes(s.id) && 
+                  !(cls.enrolledStudentIds || []).includes(s.id) && 
                   (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) &&
                   (filterStandard === '' || s.standard === filterStandard)
                 )
@@ -542,7 +561,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                   <button onClick={() => handleEnroll(student.id)} className="p-4 theme-bg text-white rounded-2xl shadow-lg hover:scale-105 transition-all"><Plus className="w-5 h-5" /></button>
                 </div>
               ))}
-              {students.filter(s => !cls.enrolledStudentIds.includes(s.id) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) && (filterStandard === '' || s.standard === filterStandard)).length === 0 && (
+              {students.filter(s => !(cls.enrolledStudentIds || []).includes(s.id) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) && (filterStandard === '' || s.standard === filterStandard)).length === 0 && (
                 <div className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
                   No matching students found in registry.
                 </div>
