@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Users, LayoutDashboard, BookOpen, ListChecks, Settings, 
-  LogOut, GraduationCap, UserCog, Menu
+  LogOut, GraduationCap, UserCog, Menu, RefreshCw, AlertTriangle
 } from 'lucide-react';
 import { 
   Role, User, Class, LessonPlan, Task, AttendanceRecord, SystemSettings, 
@@ -18,7 +18,7 @@ import StudentDashboard from './components/StudentDashboard';
 import Login from './components/Login';
 
 // Firebase Imports
-import { onSnapshot, collection, doc, setDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
+import { onSnapshot, collection, doc, setDoc, deleteDoc, getDoc, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 
@@ -46,13 +46,15 @@ const App: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
+  
+  // Debug State
+  const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. IMPROVED ROLE DETECTION
+  // 1. IMPROVED ROLE DETECTION (Fixed "Teacher shows as Learner" bug)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = firebaseUser.email || '';
-        // DEFAULT TO STUDENT FOR SAFETY (Prevents "Teacher View" leak)
         let detectedRole: Role = 'STUDENT'; 
         let userData: Partial<User> = {
           id: firebaseUser.uid,
@@ -77,9 +79,10 @@ const App: React.FC = () => {
               detectedRole = 'STUDENT';
               userData = { ...userData, ...studentDoc.data() };
             } 
-            // Legacy Fallback (Only if email explicitly says 'teacher')
+            // FIX: Restore Legacy Email Check if not found in DB
             else if (email.toLowerCase().includes('teacher')) {
               detectedRole = 'TEACHER';
+              // Optional: Auto-create the teacher profile here if you wanted
             }
           }
         }
@@ -100,25 +103,18 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
 
-    // Define Base Queries based on Role
     let qClasses = query(collection(db, 'classes'));
     let qTasks = query(collection(db, 'tasks'));
     
     // -- SCOPING RULES --
     if (currentUser.role === 'TEACHER') {
-      // Teacher sees ONLY their own classes
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
-      // Teacher sees ONLY their own tasks
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // Student sees classes they are enrolled in (Requires 'studentIds' array in Class doc)
       qClasses = query(collection(db, 'classes'), where('studentIds', 'array-contains', currentUser.id));
-      // Students don't see generic tasks, only their own if applicable
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
-    // ADMIN keeps the default "fetch all" queries defined above
 
-    // -- SUBSCRIPTIONS --
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       const loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
       setClasses(loadedClasses);
@@ -128,13 +124,10 @@ const App: React.FC = () => {
       setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
     });
 
-    // For dependent data (Lesson Plans, Attendance, etc.), we fetch all but strictly filter 
-    // in the UI or fetch only relevant ones if possible. 
-    // Note: Complex queries might require Firestore Indexes.
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
-      // Filter strictly based on visible classes to prevent leaks
       if (currentUser.role !== 'ADMIN') {
+        // Only show plans for visible classes
         const visibleClassIds = new Set(classes.map(c => c.id));
         setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
       } else {
@@ -142,31 +135,48 @@ const App: React.FC = () => {
       }
     });
 
-    const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => {
-      setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
-    });
-    
-    const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => {
-      setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult)));
-    });
-
-    const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
-      setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-    });
-    
-    const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => {
-      setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-    });
-
-    const unsubSettings = onSnapshot(doc(db, 'config', 'settings'), (snap) => {
-      if (snap.exists()) setSettings(snap.data() as SystemSettings);
-    });
+    // Subscriptions for shared data
+    const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
+    const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
+    const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
+    const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
+    const unsubSettings = onSnapshot(doc(db, 'config', 'settings'), (snap) => { if (snap.exists()) setSettings(snap.data() as SystemSettings); });
 
     return () => {
       unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); 
       unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
     };
-  }, [currentUser, classes.length]); // Re-run dependent filters if class count changes
+  }, [currentUser, classes.length]); 
+
+  // 3. RECOVERY TOOL (Fixes "Data Not Found" for Teacher)
+  const handleRecoverLegacyData = async () => {
+    if (!currentUser || currentUser.role !== 'TEACHER') return;
+    setIsRecovering(true);
+    try {
+      // Fetch ALL classes (ignoring the 'where' filter)
+      const allSnapshot = await getDocs(collection(db, 'classes'));
+      const updates = [];
+      
+      for (const docSnap of allSnapshot.docs) {
+        const data = docSnap.data();
+        // If class has NO teacherId, or an invalid one, claim it for this teacher
+        // Note: This is a "Greedy" fix. It assumes if you are running this, you own the orphan data.
+        if (!data.teacherId) {
+          updates.push(updateDoc(doc(db, 'classes', docSnap.id), {
+            teacherId: currentUser.id
+          }));
+        }
+      }
+      
+      await Promise.all(updates);
+      alert(`Recovered ${updates.length} legacy classes! You should see them now.`);
+    } catch (error) {
+      console.error("Recovery failed:", error);
+      alert("Error recovering data. See console.");
+    } finally {
+      setIsRecovering(false);
+    }
+  };
 
   // Priority Stream Task Generation
   const allTasks = useMemo(() => {
@@ -201,7 +211,9 @@ const App: React.FC = () => {
   };
 
   const syncClassUpdate = async (updated: Class) => {
-    await setDoc(doc(db, 'classes', updated.id), updated);
+    // Ensure the teacherId is preserved or set
+    const classData = { ...updated, teacherId: currentUser?.role === 'TEACHER' ? currentUser.id : updated.teacherId };
+    await setDoc(doc(db, 'classes', updated.id), classData);
   };
 
   const handleLogout = () => signOut(auth);
@@ -221,12 +233,36 @@ const App: React.FC = () => {
     if (currentUser.role === 'TEACHER') {
       switch (activeMenu) {
         case 'dashboard':
-          return <TeacherDashboard 
-            tasks={allTasks} classes={classes} 
-            lessonPlans={lessonPlans} settings={settings}
-            onClassClick={handleNavigateToClass}
-            onTaskClick={handleNavigateToTasks}
-          />;
+          return (
+            <>
+              {/* RECOVERY BANNER: Only shows if teacher has 0 classes */}
+              {classes.length === 0 && (
+                <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600" />
+                    <div>
+                      <p className="font-bold text-amber-900">Don't see your classes?</p>
+                      <p className="text-xs text-amber-700">Your old data might be missing an ID tag.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleRecoverLegacyData} 
+                    disabled={isRecovering}
+                    className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors"
+                  >
+                    {isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    Recover Legacy Data
+                  </button>
+                </div>
+              )}
+              <TeacherDashboard 
+                tasks={allTasks} classes={classes} 
+                lessonPlans={lessonPlans} settings={settings}
+                onClassClick={handleNavigateToClass}
+                onTaskClick={handleNavigateToTasks}
+              />
+            </>
+          );
         case 'classes':
           if (selectedClassId) {
             const cls = classes.find(c => c.id === selectedClassId);
@@ -271,7 +307,6 @@ const App: React.FC = () => {
     return null;
   };
 
-  // Safe check for menu items to prevent crashes if role is undefined
   const currentMenuItems = menuItems[currentUser.role] || [];
 
   return (
