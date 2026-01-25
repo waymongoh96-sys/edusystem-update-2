@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { User, UserStatus, Class } from '../types';
+import { User, UserStatus, Role, Class } from '../types';
 import { 
   Plus, Users, Edit, Filter, Trash2, BookOpen, 
   Briefcase, GraduationCap, AlertTriangle, Link 
@@ -17,19 +17,22 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   const [activeTab, setActiveTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
   const [isAdding, setIsAdding] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [isBulkImporting, setIsBulkImporting] = useState(false);
+  const [bulkData, setBulkData] = useState('');
   const [teacherFilter, setTeacherFilter] = useState('ALL');
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
 
   // --- SMART DATA ANALYSIS ---
-  // 1. Find classes that belong to teachers who don't exist (like 't1')
+  // 1. Detect Orphan Classes (Classes owned by IDs that are not in the teacher list)
   const orphanClasses = useMemo(() => {
     const validTeacherIds = new Set(teachers.map(t => t.id));
+    // An orphan is a class where the teacherId is NOT in our list of real teachers
     return classes.filter(c => !validTeacherIds.has(c.teacherId));
   }, [classes, teachers]);
 
-  // 2. Filter Logic
+  // 2. Filter Logic (Safely handles string/number mismatches)
   const stats = useMemo(() => {
     const filteredClasses = teacherFilter === 'ALL' 
       ? classes 
@@ -52,13 +55,13 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     };
   }, [classes, teacherFilter]);
 
-  // 3. Table List Logic
+  // 3. List Filtering
   const currentList = useMemo(() => {
     if (activeTab === 'TEACHER') {
       if (teacherFilter === 'ALL') return teachers;
       return teachers.filter(t => String(t.id) === String(teacherFilter));
     }
-    // Student Filter Logic
+    // For Students, show only those enrolled in the selected teacher's classes
     if (teacherFilter !== 'ALL') {
       const teacherClassIds = classes
         .filter(c => String(c.teacherId) === String(teacherFilter))
@@ -77,14 +80,14 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   const handleClaimOrphans = async () => {
     if (teacherFilter === 'ALL') {
-      alert("Please select a specific Teacher from the filter dropdown to assign these classes to.");
+      alert("Please select a specific Teacher from the filter dropdown first.");
       return;
     }
     
     const targetTeacher = teachers.find(t => t.id === teacherFilter);
     if (!targetTeacher) return;
 
-    if (!window.confirm(`Transfer ${orphanClasses.length} unassigned classes to ${targetTeacher.name}?`)) return;
+    if (!window.confirm(`Found ${orphanClasses.length} unassigned classes. Transfer them all to ${targetTeacher.name}?`)) return;
 
     try {
       const batch = writeBatch(db);
@@ -93,7 +96,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         batch.update(ref, { teacherId: targetTeacher.id });
       });
       await batch.commit();
-      alert("Success! Data has been repaired.");
+      alert("Success! Classes re-assigned. The dashboard should now update.");
     } catch (err) {
       console.error("Migration failed:", err);
       alert("Failed to update classes.");
@@ -111,6 +114,34 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     setFormData({ name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1' });
   };
 
+  const handleEdit = (user: User) => {
+    setEditingUserId(user.id);
+    setFormData(user);
+    setIsAdding(true);
+  };
+
+  const handleBulkImport = async () => {
+    if (!bulkData.trim()) return;
+    const lines = bulkData.split('\n');
+    const batch = writeBatch(db);
+    let count = 0;
+    lines.forEach((line) => {
+      const parts = line.split(',').map(p => p.trim());
+      if (parts.length >= 2) {
+        const id = `bulk-${Date.now()}-${count}`;
+        const newUser: User = { id, name: parts[0], username: parts[1], password: 'password123', role: 'STUDENT', status: UserStatus.ACTIVE, age: parts[2] ? parseInt(parts[2]) : 10, standard: parts[3] || '1' };
+        batch.set(doc(db, 'students', id), newUser);
+        count++;
+      }
+    });
+    if (count > 0) {
+      await batch.commit();
+      alert(`Successfully imported ${count} students.`);
+    }
+    setIsBulkImporting(false);
+    setBulkData('');
+  };
+
   const handleDelete = async (user: User) => {
     if (window.confirm(`Delete ${user.name}?`)) {
       const collectionName = user.role === 'TEACHER' ? 'teachers' : 'students';
@@ -118,34 +149,28 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     }
   };
 
-  const handleEdit = (user: User) => {
-    setEditingUserId(user.id);
-    setFormData(user);
-    setIsAdding(true);
-  };
-
   return (
     <div className="space-y-10">
-      {/* 1. HEADER SECTION */}
+      {/* HEADER & REPAIR TOOL */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">Institutional Terminal</h1>
           <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Admin Operations</p>
         </div>
         
-        {/* REPAIR TOOL: Only shows if orphans exist */}
+        {/* SMART REPAIR BUTTON: Only appears if data is broken */}
         {orphanClasses.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl flex items-center gap-4 animate-pulse">
             <div className="flex items-center gap-2 text-amber-700">
               <AlertTriangle className="w-5 h-5" />
-              <span className="text-xs font-black uppercase tracking-widest">{orphanClasses.length} Unassigned Classes Found</span>
+              <span className="text-xs font-black uppercase tracking-widest">{orphanClasses.length} Unassigned Classes</span>
             </div>
             <button 
               onClick={handleClaimOrphans}
               className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2"
             >
               <Link className="w-3 h-3" />
-              {teacherFilter === 'ALL' ? 'Select Teacher to Claim' : `Assign to Selected`}
+              {teacherFilter === 'ALL' ? 'Select Teacher First' : `Assign to Selected`}
             </button>
           </div>
         )}
@@ -166,7 +191,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      {/* 2. STATS DASHBOARD */}
+      {/* STATS DASHBOARD */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard icon={BookOpen} label="Total Classes" value={stats.totalClasses} color="blue" />
         <StatCard icon={Users} label="Enrollments" value={stats.totalEnrollments} color="purple" />
@@ -174,7 +199,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <StatCard icon={GraduationCap} label="Unique Students" value={stats.uniqueCount} color="indigo" />
       </div>
 
-      {/* 3. DATA TABLE */}
+      {/* DATA TABLE */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-slate-100 pt-10">
         <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
           <button onClick={() => setActiveTab('TEACHER')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -184,7 +209,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
             <GraduationCap className="w-4 h-4" /> Students
           </button>
         </div>
-        <button onClick={() => { setEditingUserId(null); setIsAdding(true); }} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"><Plus className="w-5 h-5" /> New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}</button>
+        <div className="flex gap-3">
+          {activeTab === 'STUDENT' && (
+            <button onClick={() => setIsBulkImporting(true)} className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-xl flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"><Upload className="w-5 h-5" /> Bulk Import</button>
+          )}
+          <button onClick={() => { setEditingUserId(null); setIsAdding(true); }} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-purple-100"><Plus className="w-5 h-5" /> New {activeTab === 'TEACHER' ? 'Staff' : 'Student'}</button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -257,7 +287,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   );
 };
 
-// Helper Component for Stats
 const StatCard = ({ icon: Icon, label, value, color }: any) => (
   <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:border-slate-300 transition-all">
     <div className={`p-4 rounded-2xl mb-4 group-hover:scale-110 transition-transform bg-${color}-50 text-${color}-600`}>
