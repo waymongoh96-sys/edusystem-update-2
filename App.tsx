@@ -50,57 +50,43 @@ const App: React.FC = () => {
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. INTELLIGENT ROLE & ID DETECTION (THE BRIDGE FIX)
+  // 1. RULE-BASED ROLE DETECTION
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
         const username = email.split('@')[0];
         
-        let finalUserData: User = {
-          id: firebaseUser.uid, // Default to Auth UID
+        let detectedRole: Role = 'STUDENT'; 
+
+        // STRICT CONVENTION RULES
+        if (username.includes('admin')) {
+          detectedRole = 'ADMIN';
+        } else if (username.endsWith('.teacher')) {
+          detectedRole = 'TEACHER';
+        } 
+        
+        let userData: Partial<User> = {
+          id: firebaseUser.uid,
           name: firebaseUser.displayName || username,
           username: username,
           status: UserStatus.ACTIVE,
-          role: 'STUDENT' // Default fallback
+          role: detectedRole
         };
 
-        // A. Check for ADMIN Override
-        if (username.includes('admin')) {
-          finalUserData.role = 'ADMIN';
-        } else {
-          // B. Check Database for Existing Profile (Teacher or Student)
-          
-          // 1. Try finding exact ID match in Teachers
-          const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
-          
-          if (teacherDoc.exists()) {
-             finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
-          } else {
-            // 2. Try finding exact ID match in Students
-            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
-            
-            if (studentDoc.exists()) {
-               finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
-            } else {
-               // 3. "THE BRIDGE": Search by Username if ID mismatch (Fixes Bulk Import Issue)
-               // This finds the "bulk-1769..." document and adopts its ID
-               const studentQuery = query(collection(db, 'students'), where('username', '==', username));
-               const studentSnap = await getDocs(studentQuery);
-               
-               if (!studentSnap.empty) {
-                 const match = studentSnap.docs[0];
-                 // CRITICAL: We adopt the ID from the database (bulk-xxx) instead of the Google ID
-                 finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
-                 console.log("Bridged Auth User to Database ID:", match.id);
-               } else if (username.endsWith('.teacher')) {
-                 finalUserData.role = 'TEACHER';
-               }
+        try {
+          const collectionName = detectedRole === 'TEACHER' ? 'teachers' : (detectedRole === 'STUDENT' ? 'students' : null);
+          if (collectionName) {
+            const userDoc = await getDoc(doc(db, collectionName, firebaseUser.uid));
+            if (userDoc.exists()) {
+              userData = { ...userData, ...userDoc.data() };
             }
           }
+        } catch (e) {
+          console.log("Profile load error (harmless if new user):", e);
         }
 
-        setCurrentUser(finalUserData as User);
+        setCurrentUser(userData as User);
       } else {
         setCurrentUser(null);
       }
@@ -132,9 +118,9 @@ const App: React.FC = () => {
       // FIX: Smart Filter for Students
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
+          // Check New Field OR Old Field
           const enrolled = c.enrolledStudentIds || [];
           const legacy = (c as any).studentIds || []; 
-          // Checks if either list contains the user's ID (which is now the bridged ID)
           return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
         });
       }
@@ -148,6 +134,7 @@ const App: React.FC = () => {
 
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
+      // Filter strictly based on visible classes to prevent leaks
       if (currentUser.role !== 'ADMIN') {
         const visibleClassIds = new Set(classes.map(c => c.id));
         setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
@@ -156,17 +143,19 @@ const App: React.FC = () => {
       }
     });
 
+    // Subscriptions for shared data
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     
-    // --- [FIXED] USER-SPECIFIC SETTINGS ---
-    const settingsRef = doc(db, 'user_settings', currentUser.id);
-    const unsubSettings = onSnapshot(settingsRef, (snap) => { 
+    // --- SETTINGS ISOLATION FIX ---
+    // Instead of one global 'config/settings', we listen to 'user_settings/{userId}'
+    const unsubSettings = onSnapshot(doc(db, 'user_settings', currentUser.id), (snap) => { 
       if (snap.exists()) {
         setSettings(snap.data() as SystemSettings); 
       } else {
+        // Fallback to defaults if new user
         setSettings(INITIAL_SETTINGS);
       }
     });
@@ -313,6 +302,7 @@ const App: React.FC = () => {
         case 'tasks':
           return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
         case 'settings':
+          // FIX: Pass currentUser so we save settings to the specific user's document
           return <SettingsView settings={settings} currentUser={currentUser} />;
         default:
           return null;
@@ -403,6 +393,17 @@ const App: React.FC = () => {
       </main>
     </div>
   );
+};
+
+const menuItems = {
+  ADMIN: [{ id: 'dashboard', icon: LayoutDashboard, label: 'Admin Hub' }],
+  TEACHER: [
+    { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { id: 'classes', icon: BookOpen, label: 'Class Registry' },
+    { id: 'tasks', icon: ListChecks, label: 'To-Do List' },
+    { id: 'settings', icon: Settings, label: 'Settings' }
+  ],
+  STUDENT: [{ id: 'dashboard', icon: LayoutDashboard, label: 'My Learning' }]
 };
 
 export default App;
