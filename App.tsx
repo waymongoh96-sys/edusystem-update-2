@@ -50,24 +50,22 @@ const App: React.FC = () => {
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. NEW RULE-BASED ROLE DETECTION
+  // 1. RULE-BASED ROLE DETECTION
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
-        const username = email.split('@')[0]; // Get part before @
+        const username = email.split('@')[0];
         
-        let detectedRole: Role = 'STUDENT'; // Default fallback
+        let detectedRole: Role = 'STUDENT'; 
 
-        // --- STRICT CONVENTION RULES ---
+        // STRICT CONVENTION RULES
         if (username.includes('admin')) {
           detectedRole = 'ADMIN';
         } else if (username.endsWith('.teacher')) {
           detectedRole = 'TEACHER';
         } 
-        // If neither, they stay as STUDENT
         
-        // Base User Data
         let userData: Partial<User> = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || username,
@@ -76,8 +74,6 @@ const App: React.FC = () => {
           role: detectedRole
         };
 
-        // Attempt to load extra profile data from DB if it exists
-        // (This preserves legacy data while respecting the new Rule)
         try {
           const collectionName = detectedRole === 'TEACHER' ? 'teachers' : (detectedRole === 'STUDENT' ? 'students' : null);
           if (collectionName) {
@@ -134,7 +130,6 @@ const App: React.FC = () => {
       }
     });
 
-    // Shared Data Subscriptions
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
@@ -157,7 +152,6 @@ const App: React.FC = () => {
       
       for (const docSnap of allSnapshot.docs) {
         const data = docSnap.data();
-        // Claim orphan classes
         if (!data.teacherId) {
           updates.push(updateDoc(doc(db, 'classes', docSnap.id), {
             teacherId: currentUser.id
@@ -175,7 +169,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Priority Stream Task Generation
   const allTasks = useMemo(() => {
     const autoTasks: Task[] = lessonPlans
       .filter(lp => lp.status !== TaskStatus.COMPLETE)
@@ -255,6 +248,7 @@ const App: React.FC = () => {
                 lessonPlans={lessonPlans} settings={settings}
                 onClassClick={handleNavigateToClass}
                 onTaskClick={handleNavigateToTasks}
+                currentUser={currentUser} // PASSED HERE
               />
             </>
           );
@@ -270,6 +264,7 @@ const App: React.FC = () => {
                 onBack={() => setSelectedClassId(null)}
                 onDeletePlan={deleteLessonPlan}
                 updateClass={syncClassUpdate}
+                currentUser={currentUser} // PASSED HERE
               />
             ) : null;
           }
@@ -278,9 +273,10 @@ const App: React.FC = () => {
             onSelectClass={setSelectedClassId} 
             settings={settings}
             lessonPlans={lessonPlans}
+            currentUser={currentUser} // PASSED HERE
           />;
         case 'tasks':
-          return <TaskBoard tasks={tasks} settings={settings} />;
+          return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />; // PASSED HERE
         case 'settings':
           return <SettingsView settings={settings} />;
         default:
