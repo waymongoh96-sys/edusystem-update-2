@@ -10,11 +10,11 @@ interface ClassRegistryProps {
   onSelectClass: (id: string) => void;
   settings: SystemSettings;
   lessonPlans: LessonPlan[];
-  currentUser: User | null; // <--- ADDED THIS to receive the logged-in user
+  currentUser: User | null; // Added prop
 }
 
 const ClassRegistry: React.FC<ClassRegistryProps> = ({ 
-  classes, onSelectClass, settings, lessonPlans, currentUser // <--- DESTRUCTURED HERE
+  classes, onSelectClass, settings, lessonPlans, currentUser 
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
@@ -100,19 +100,17 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Safety check: Ensure we have a valid user ID to attach to this class
-    const ownerId = currentUser?.id;
-    if (!ownerId) {
-      alert("Error: Cannot identify teacher. Please log in again.");
-      return;
+    if (!currentUser) {
+       alert("Error: No user logged in.");
+       return;
     }
 
     const classId = editingClass ? editingClass.id : Date.now().toString();
     const classData: Class = {
       id: classId,
       ...formData,
-      // CRITICAL FIX: Use the logged-in user's ID, not 't1'
-      teacherId: editingClass ? editingClass.teacherId : ownerId, 
+      // CRITICAL FIX: Use the REAL user ID, not 't1'
+      teacherId: editingClass ? editingClass.teacherId : currentUser.id, 
       enrolledStudentIds: editingClass ? editingClass.enrolledStudentIds : [],
       order: editingClass?.order ?? classes.length
     };
@@ -123,7 +121,7 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
       setEditingClass(null);
     } catch (err) {
       console.error("Save failed:", err);
-      alert("Failed to save data. Please check your Firestore Security Rules.");
+      alert("Failed to save data.");
     }
   };
 
@@ -145,7 +143,6 @@ const ClassRegistry: React.FC<ClassRegistryProps> = ({
     const [removed] = reordered.splice(oldIndex, 1);
     reordered.splice(newIndex, 0, removed);
 
-    // Persist new order to Firestore using batch
     const batch = writeBatch(db);
     reordered.forEach((cls, idx) => {
       const ref = doc(db, 'classes', cls.id);
