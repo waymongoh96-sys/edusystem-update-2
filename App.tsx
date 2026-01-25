@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Users, LayoutDashboard, BookOpen, ListChecks, Settings, 
@@ -19,7 +18,7 @@ import StudentDashboard from './components/StudentDashboard';
 import Login from './components/Login';
 
 // Firebase Imports
-import { onSnapshot, collection, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { onSnapshot, collection, doc, setDoc, deleteDoc, getDoc, query, where } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 
@@ -48,12 +47,13 @@ const App: React.FC = () => {
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
 
-  // Sync Auth and Role Detection
+  // 1. IMPROVED ROLE DETECTION
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = firebaseUser.email || '';
-        let detectedRole: Role = 'TEACHER';
+        // DEFAULT TO STUDENT FOR SAFETY (Prevents "Teacher View" leak)
+        let detectedRole: Role = 'STUDENT'; 
         let userData: Partial<User> = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || email.split('@')[0],
@@ -65,20 +65,21 @@ const App: React.FC = () => {
         if (email.toLowerCase().includes('admin')) {
           detectedRole = 'ADMIN';
         } else {
-          // Check Students Collection
-          const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
-          if (studentDoc.exists()) {
-            detectedRole = 'STUDENT';
-            userData = { ...userData, ...studentDoc.data() };
+          // Check Teachers Collection First
+          const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
+          if (teacherDoc.exists()) {
+            detectedRole = 'TEACHER';
+            userData = { ...userData, ...teacherDoc.data() };
           } else {
-            // Check Teachers Collection
-            const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
-            if (teacherDoc.exists()) {
-              detectedRole = 'TEACHER';
-              userData = { ...userData, ...teacherDoc.data() };
-            } else if (email.toLowerCase().includes('student')) {
-              // Fallback for legacy email-based detection if not in collection yet
+            // Check Students Collection
+            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
+            if (studentDoc.exists()) {
               detectedRole = 'STUDENT';
+              userData = { ...userData, ...studentDoc.data() };
+            } 
+            // Legacy Fallback (Only if email explicitly says 'teacher')
+            else if (email.toLowerCase().includes('teacher')) {
+              detectedRole = 'TEACHER';
             }
           }
         }
@@ -95,39 +96,77 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Firestore Sync
+  // 2. DATA ISOLATION LOGIC
   useEffect(() => {
     if (!currentUser) return;
 
-    const unsubClasses = onSnapshot(collection(db, 'classes'), (snap) => {
-      setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Class)));
+    // Define Base Queries based on Role
+    let qClasses = query(collection(db, 'classes'));
+    let qTasks = query(collection(db, 'tasks'));
+    
+    // -- SCOPING RULES --
+    if (currentUser.role === 'TEACHER') {
+      // Teacher sees ONLY their own classes
+      qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
+      // Teacher sees ONLY their own tasks
+      qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
+    } else if (currentUser.role === 'STUDENT') {
+      // Student sees classes they are enrolled in (Requires 'studentIds' array in Class doc)
+      qClasses = query(collection(db, 'classes'), where('studentIds', 'array-contains', currentUser.id));
+      // Students don't see generic tasks, only their own if applicable
+      qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
+    }
+    // ADMIN keeps the default "fetch all" queries defined above
+
+    // -- SUBSCRIPTIONS --
+    const unsubClasses = onSnapshot(qClasses, (snap) => {
+      const loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
+      setClasses(loadedClasses);
     });
-    const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
-      setLessonPlans(snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan)));
-    });
-    const unsubTasks = onSnapshot(collection(db, 'tasks'), (snap) => {
+
+    const unsubTasks = onSnapshot(qTasks, (snap) => {
       setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
     });
+
+    // For dependent data (Lesson Plans, Attendance, etc.), we fetch all but strictly filter 
+    // in the UI or fetch only relevant ones if possible. 
+    // Note: Complex queries might require Firestore Indexes.
+    const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
+      const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
+      // Filter strictly based on visible classes to prevent leaks
+      if (currentUser.role !== 'ADMIN') {
+        const visibleClassIds = new Set(classes.map(c => c.id));
+        setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
+      } else {
+        setLessonPlans(allPlans);
+      }
+    });
+
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => {
       setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
     });
+    
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => {
       setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult)));
     });
+
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
       setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
     });
+    
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => {
       setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
     });
+
     const unsubSettings = onSnapshot(doc(db, 'config', 'settings'), (snap) => {
       if (snap.exists()) setSettings(snap.data() as SystemSettings);
     });
 
     return () => {
-      unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
+      unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); 
+      unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
     };
-  }, [currentUser]);
+  }, [currentUser, classes.length]); // Re-run dependent filters if class count changes
 
   // Priority Stream Task Generation
   const allTasks = useMemo(() => {
@@ -157,7 +196,6 @@ const App: React.FC = () => {
     setActiveMenu('tasks');
   };
 
-  // Firestore Data Operations - Expose setters to components
   const deleteLessonPlan = async (id: string) => {
     await deleteDoc(doc(db, 'lessonPlans', id));
   };
@@ -233,6 +271,9 @@ const App: React.FC = () => {
     return null;
   };
 
+  // Safe check for menu items to prevent crashes if role is undefined
+  const currentMenuItems = menuItems[currentUser.role] || [];
+
   return (
     <div className="min-h-screen flex bg-slate-50/50">
       <style>{`
@@ -256,7 +297,7 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 mt-10 px-4 space-y-2">
-          {menuItems[currentUser.role].map((item) => (
+          {currentMenuItems.map((item) => (
             <button
               key={item.id}
               onClick={() => { setActiveMenu(item.id); setSelectedClassId(null); }}
