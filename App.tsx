@@ -95,7 +95,7 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. DATA ISOLATION LOGIC
+// 2. DATA ISOLATION LOGIC
   useEffect(() => {
     if (!currentUser) return;
 
@@ -104,18 +104,33 @@ const App: React.FC = () => {
     
     // -- SCOPING RULES --
     if (currentUser.role === 'TEACHER') {
+      // Teacher: Strict DB filtering (works fine because you are the creator)
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
-    // In App.tsx (inside the useEffect)
-
-} else if (currentUser.role === 'STUDENT') {  
-  // NEW (Fixed):
-  qClasses = query(collection(db, 'classes'), where('enrolledStudentIds', 'array-contains', currentUser.id));
+    } else if (currentUser.role === 'STUDENT') {
+      // Student: Fetch ALL classes, then filter in memory below
+      // This catches both 'studentIds' and 'enrolledStudentIds'
+      qClasses = query(collection(db, 'classes'));
+      
+      // Tasks are still strict
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
     const unsubClasses = onSnapshot(qClasses, (snap) => {
-      const loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
+      let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
+
+      // --- CRITICAL FIX FOR STUDENT VIEW ---
+      if (currentUser.role === 'STUDENT') {
+        loadedClasses = loadedClasses.filter(c => {
+          // Check BOTH possible field names to find the student
+          const enrolled = c.enrolledStudentIds || [];
+          const legacy = (c as any).studentIds || []; // Checks for old data
+          
+          return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
+        });
+      }
+      // -------------------------------------
+
       setClasses(loadedClasses);
     });
 
@@ -125,6 +140,7 @@ const App: React.FC = () => {
 
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
+      // Filter strictly based on visible classes to prevent leaks
       if (currentUser.role !== 'ADMIN') {
         const visibleClassIds = new Set(classes.map(c => c.id));
         setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
@@ -133,6 +149,7 @@ const App: React.FC = () => {
       }
     });
 
+    // Subscriptions for shared data
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
@@ -143,7 +160,7 @@ const App: React.FC = () => {
       unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); 
       unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
     };
-  }, [currentUser, classes.length]); 
+  }, [currentUser, classes.length]);
 
   // 3. RECOVERY TOOL
   const handleRecoverLegacyData = async () => {
