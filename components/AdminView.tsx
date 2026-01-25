@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { User, UserStatus, Role, Class } from '../types';
 import { 
   Plus, Users, Edit, Filter, Trash2, BookOpen, 
-  Briefcase, GraduationCap, AlertTriangle, Link 
+  Briefcase, GraduationCap, AlertTriangle, Link, X
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -25,22 +25,19 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   });
 
   // --- SMART DATA ANALYSIS ---
-  // 1. Detect Orphan Classes (Classes owned by IDs that are not in the teacher list)
+  // Detect classes that don't belong to any valid teacher in the list
   const orphanClasses = useMemo(() => {
     const validTeacherIds = new Set(teachers.map(t => t.id));
-    // An orphan is a class where the teacherId is NOT in our list of real teachers
     return classes.filter(c => !validTeacherIds.has(c.teacherId));
   }, [classes, teachers]);
 
-  // 2. Filter Logic (Safely handles string/number mismatches)
+  // Filter Logic
   const stats = useMemo(() => {
     const filteredClasses = teacherFilter === 'ALL' 
       ? classes 
       : classes.filter(c => String(c.teacherId) === String(teacherFilter));
       
     const totalClasses = filteredClasses.length;
-    
-    // Count both legacy and new enrollments
     const totalEnrollments = filteredClasses.reduce((sum, cls) => {
       const ids = cls.enrolledStudentIds || (cls as any).studentIds || [];
       return sum + ids.length;
@@ -55,13 +52,11 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     };
   }, [classes, teacherFilter]);
 
-  // 3. List Filtering
   const currentList = useMemo(() => {
     if (activeTab === 'TEACHER') {
       if (teacherFilter === 'ALL') return teachers;
       return teachers.filter(t => String(t.id) === String(teacherFilter));
     }
-    // For Students, show only those enrolled in the selected teacher's classes
     if (teacherFilter !== 'ALL') {
       const teacherClassIds = classes
         .filter(c => String(c.teacherId) === String(teacherFilter))
@@ -77,17 +72,16 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   }, [activeTab, teachers, students, teacherFilter, classes]);
 
   // --- ACTIONS ---
-
   const handleClaimOrphans = async () => {
     if (teacherFilter === 'ALL') {
-      alert("Please select a specific Teacher from the filter dropdown first.");
+      alert("Please select a specific Teacher from the dropdown first to assign these classes to.");
       return;
     }
     
     const targetTeacher = teachers.find(t => t.id === teacherFilter);
     if (!targetTeacher) return;
 
-    if (!window.confirm(`Found ${orphanClasses.length} unassigned classes. Transfer them all to ${targetTeacher.name}?`)) return;
+    if (!window.confirm(`Found ${orphanClasses.length} unassigned classes. Transfer them to ${targetTeacher.name}?`)) return;
 
     try {
       const batch = writeBatch(db);
@@ -96,7 +90,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         batch.update(ref, { teacherId: targetTeacher.id });
       });
       await batch.commit();
-      alert("Success! Classes re-assigned. The dashboard should now update.");
+      alert("Success! Classes assigned.");
     } catch (err) {
       console.error("Migration failed:", err);
       alert("Failed to update classes.");
@@ -151,14 +145,13 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   return (
     <div className="space-y-10">
-      {/* HEADER & REPAIR TOOL */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">Institutional Terminal</h1>
           <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Admin Operations</p>
         </div>
         
-        {/* SMART REPAIR BUTTON: Only appears if data is broken */}
+        {/* REPAIR BUTTON */}
         {orphanClasses.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl flex items-center gap-4 animate-pulse">
             <div className="flex items-center gap-2 text-amber-700">
@@ -191,7 +184,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </div>
       </div>
 
-      {/* STATS DASHBOARD */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard icon={BookOpen} label="Total Classes" value={stats.totalClasses} color="blue" />
         <StatCard icon={Users} label="Enrollments" value={stats.totalEnrollments} color="purple" />
@@ -199,7 +191,6 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <StatCard icon={GraduationCap} label="Unique Students" value={stats.uniqueCount} color="indigo" />
       </div>
 
-      {/* DATA TABLE */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-slate-100 pt-10">
         <div className="flex bg-slate-200/50 p-1.5 rounded-2xl w-fit">
           <button onClick={() => setActiveTab('TEACHER')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'TEACHER' ? 'bg-white shadow-md text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -264,7 +255,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-8">
               <h2 className="text-2xl font-black text-slate-800">{editingUserId ? 'Edit Account' : 'New Account'}</h2>
-              <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">✕</button>
+              <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
             <form onSubmit={handleSave} className="space-y-5">
               <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Name</label><input required placeholder="e.g. John Doe" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
@@ -278,6 +269,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
                   <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Standard</label><input className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" value={formData.standard} onChange={e => setFormData({...formData, standard: e.target.value})} /></div>
                 </div>
               )}
+              <div><label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Employment Status</label><select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value as UserStatus})}><option value={UserStatus.ACTIVE}>Active Enrollment</option><option value={UserStatus.RESIGNED}>Inactive / Discharged</option></select></div>
               <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 shadow-xl mt-6 transition-all active:scale-95">{editingUserId ? 'Update' : 'Create'}</button>
             </form>
           </div>
