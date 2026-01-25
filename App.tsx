@@ -1,4 +1,3 @@
-// App.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Users, LayoutDashboard, BookOpen, ListChecks, Settings, 
@@ -47,7 +46,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. INTELLIGENT ROLE & ID DETECTION
+  // 1. INTELLIGENT ROLE & ID DETECTION (THE BRIDGE)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -60,35 +59,34 @@ const App: React.FC = () => {
           name: firebaseUser.displayName || username,
           username: username,
           status: UserStatus.ACTIVE,
-          role: 'STUDENT' // Default
+          role: 'STUDENT' // Default fallback
         };
 
         if (username.includes('admin')) {
           finalUserData.role = 'ADMIN';
         } else {
-          // Check Teacher
+          // Check Teacher Collection
           const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
           if (teacherDoc.exists()) {
              finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
           } else {
-            // Check Student
+            // Check Student Collection
             const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
             if (studentDoc.exists()) {
                finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
             } else {
-               // BRIDGE LOGIC
+               // BRIDGE LOGIC: Find bulk imported accounts by username
                console.log("Checking Bridge for username:", username);
                const studentQuery = query(collection(db, 'students'), where('username', '==', username));
                const studentSnap = await getDocs(studentQuery);
                
                if (!studentSnap.empty) {
                  const match = studentSnap.docs[0];
+                 // Adopt the database ID (bulk-xxx) instead of the Google ID
                  finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
                  console.log("BRIDGE SUCCESS: Linked to", match.id);
                } else if (username.endsWith('.teacher')) {
                  finalUserData.role = 'TEACHER';
-               } else {
-                 console.log("BRIDGE FAILED: No student found with username", username);
                }
             }
           }
@@ -113,13 +111,14 @@ const App: React.FC = () => {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // Student: Fetch ALL, filter locally
+      // Student: Fetch ALL classes, filtering happens in memory below
       qClasses = query(collection(db, 'classes')); 
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
+      // FIX: Smart Filter for Students (Checks both New and Legacy fields)
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
           const enrolled = c.enrolledStudentIds || [];
@@ -131,6 +130,7 @@ const App: React.FC = () => {
     });
     
     const unsubTasks = onSnapshot(qTasks, (snap) => setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))));
+    
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
       if (currentUser.role !== 'ADMIN') {
@@ -145,7 +145,10 @@ const App: React.FC = () => {
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
-    const unsubSettings = onSnapshot(doc(db, 'user_settings', currentUser.id), (snap) => { 
+    
+    // FIX: User-Specific Settings Listener
+    const settingsRef = doc(db, 'user_settings', currentUser.id);
+    const unsubSettings = onSnapshot(settingsRef, (snap) => { 
       if (snap.exists()) setSettings(snap.data() as SystemSettings); 
       else setSettings(INITIAL_SETTINGS);
     });
@@ -165,6 +168,7 @@ const App: React.FC = () => {
       const updates = [];
       for (const docSnap of allSnapshot.docs) {
         const data = docSnap.data();
+        // Claim classes that have no teacher or are assigned to the ghost 't1'
         if (!data.teacherId || data.teacherId === 't1') {
           updates.push(updateDoc(doc(db, 'classes', docSnap.id), { teacherId: currentUser.id }));
         }
@@ -215,7 +219,7 @@ const App: React.FC = () => {
             return cls ? <ClassDetails cls={cls} students={students} lessonPlans={lessonPlans} setLessonPlans={setLessonPlans} attendance={attendance} setAttendance={setAttendance} settings={settings} examResults={examResults} setExamResults={setExamResults} onBack={() => setSelectedClassId(null)} onDeletePlan={deleteLessonPlan} updateClass={syncClassUpdate} currentUser={currentUser} /> : null;
           }
           return <ClassRegistry classes={classes} onSelectClass={setSelectedClassId} settings={settings} lessonPlans={lessonPlans} currentUser={currentUser} />;
-        case 'tasks': return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
+        case 'tasks': return <TaskBoard tasks={tasks} settings={settings} />;
         case 'settings': return <SettingsView settings={settings} currentUser={currentUser} />;
         default: return null;
       }
