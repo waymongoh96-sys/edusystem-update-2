@@ -23,13 +23,20 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   // 1. STATS: RESPOND TO FILTER (This changes based on dropdown)
   const stats = useMemo(() => {
+    // FILTER LOGIC
     const filteredClasses = teacherFilter === 'ALL' 
       ? classes 
-      : classes.filter(c => c.teacherId === teacherFilter);
+      : classes.filter(c => String(c.teacherId) === String(teacherFilter)); // Safe String comparison
       
     const totalClasses = filteredClasses.length;
-    const totalEnrollments = filteredClasses.reduce((sum, cls) => sum + (cls.enrolledStudentIds?.length || 0), 0);
-    const uniqueStudentIds = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds || []));
+    // Check both legacy and new student lists
+    const totalEnrollments = filteredClasses.reduce((sum, cls) => {
+      const ids = cls.enrolledStudentIds || (cls as any).studentIds || [];
+      return sum + ids.length;
+    }, 0);
+    
+    // Unique count
+    const uniqueStudentIds = new Set(filteredClasses.flatMap(c => c.enrolledStudentIds || (c as any).studentIds || []));
     
     return { 
       totalClasses, 
@@ -46,11 +53,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = editingUserId || Date.now().toString();
-    const newUser: User = {
-      ...formData as User,
-      id,
-      role: activeTab
-    };
+    const newUser: User = { ...formData as User, id, role: activeTab };
     const collectionName = activeTab === 'TEACHER' ? 'teachers' : 'students';
     await setDoc(doc(db, collectionName, id), newUser);
     setIsAdding(false);
@@ -72,12 +75,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     lines.forEach((line) => {
       const parts = line.split(',').map(p => p.trim());
       if (parts.length >= 2) {
-        const name = parts[0];
-        const username = parts[1];
-        const age = parts[2] ? parseInt(parts[2]) : 10;
-        const standard = parts[3] || '1';
         const id = `bulk-${Date.now()}-${count}`;
-        const newUser: User = { id, name, username, password: 'password123', role: 'STUDENT', status: UserStatus.ACTIVE, age, standard };
+        const newUser: User = { 
+            id, name: parts[0], username: parts[1], password: 'password123', 
+            role: 'STUDENT', status: UserStatus.ACTIVE, 
+            age: parts[2] ? parseInt(parts[2]) : 10, standard: parts[3] || '1' 
+        };
         batch.set(doc(db, 'students', id), newUser);
         count++;
       }
@@ -131,7 +134,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 theme-light-bg rounded-2xl mb-4 group-hover:scale-110 transition-transform"><BookOpen className="w-8 h-8 theme-primary" /></div>
           <h4 className="text-3xl font-black text-slate-800">{stats.totalClasses}</h4>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Managed Classes</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{teacherFilter === 'ALL' ? 'Total Classes' : 'Teacher\'s Classes'}</p>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center text-center group hover:theme-border transition-all">
           <div className="p-4 bg-purple-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform"><Users className="w-8 h-8 text-purple-600" /></div>
