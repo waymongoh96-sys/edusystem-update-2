@@ -35,7 +35,9 @@ const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }:
     />
   );
 };
-// ------------------------------------------------
+
+// --- CONSTANTS ---
+const ATTENDANCE_OPTIONS = ['PRESENT', 'ABSENT', 'LATE'];
 
 interface ClassDetailsProps {
   cls: Class;
@@ -140,26 +142,23 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // --- ATTENDANCE FIX START ---
-  const handleAttendanceChange = async (studentId: string, status: AttendanceStatus) => {
+  // --- ATTENDANCE FIX ---
+  const handleAttendanceChange = async (studentId: string, status: string) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    // UNDO LOGIC: If clicking the same status, delete the record (toggle off)
+    // UNDO: If clicking the same status, delete the record
     if (existing?.status === status) {
-      try { 
-        await deleteDoc(doc(db, 'attendance', recordId)); 
-      } catch (err) { console.error(err); }
+      try { await deleteDoc(doc(db, 'attendance', recordId)); } catch (err) { console.error(err); }
       return;
     }
 
-    // UPDATE LOGIC: Set new status
     const record: AttendanceRecord = {
       id: recordId,
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status,
+      status: status as AttendanceStatus,
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
       testScore: existing?.testScore
@@ -167,18 +166,17 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     await setDoc(doc(db, 'attendance', recordId), record);
   };
 
-  // COLOR LOGIC FIX: Check if isActive is strictly true
-  const getAttendanceBtnColor = (status: AttendanceStatus, isActive: boolean) => {
+  // COLOR FIX: Explicitly match the requested colors
+  const getAttendanceBtnColor = (status: string, isActive: boolean) => {
     if (!isActive) return 'bg-slate-50 text-slate-400 hover:bg-slate-200 border border-slate-100';
     
     switch(status) {
-      case AttendanceStatus.PRESENT: return 'bg-emerald-500 text-white shadow-md shadow-emerald-200 border-transparent';
-      case AttendanceStatus.ABSENT: return 'bg-red-500 text-white shadow-md shadow-red-200 border-transparent';
-      case AttendanceStatus.LATE: return 'bg-amber-400 text-white shadow-md shadow-amber-200 border-transparent';
-      default: return 'bg-slate-400 text-white shadow-md';
+      case 'PRESENT': return 'bg-emerald-500 text-white shadow-md shadow-emerald-200 border-transparent';
+      case 'ABSENT': return 'bg-red-500 text-white shadow-md shadow-red-200 border-transparent';
+      case 'LATE': return 'bg-yellow-400 text-white shadow-md shadow-yellow-200 border-transparent';
+      default: return 'bg-slate-400 text-white';
     }
   };
-  // --- ATTENDANCE FIX END ---
 
   const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: any) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
@@ -267,6 +265,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+        {/* LEFT COLUMN: ARCHIVE */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <div className="flex items-center justify-between mb-10">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -295,6 +294,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
+        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -344,19 +344,20 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                         <td className="px-6 py-6">
                           <div className="flex flex-col items-center gap-2">
                             <div className="flex justify-center gap-2">
-                              {Object.values(AttendanceStatus).map(status => (
+                              {/* FIXED BUTTONS HERE */}
+                              {ATTENDANCE_OPTIONS.map(status => (
                                 <button 
                                   key={status} 
-                                  onClick={() => handleAttendanceChange(student.id, status as AttendanceStatus)} 
+                                  onClick={() => handleAttendanceChange(student.id, status)} 
                                   className={`w-10 h-10 rounded-xl text-[10px] font-black uppercase transition-all ${
-                                    getAttendanceBtnColor(status as AttendanceStatus, record?.status === status)
+                                    getAttendanceBtnColor(status, record?.status === status)
                                   }`}
                                 >
                                   {status.charAt(0)}
                                 </button>
                               ))}
                             </div>
-                            {record?.status === AttendanceStatus.ABSENT && (
+                            {record?.status === 'ABSENT' && (
                               <select 
                                 className="w-full mt-1 p-2 bg-red-50 border border-red-100 rounded-lg text-[9px] font-black text-red-700 outline-none"
                                 value={record.reason || ''}
@@ -402,6 +403,8 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
         </div>
       </div>
 
+      {/* EXAM CORE SECTION OMITTED FOR BREVITY - REMAINS SAME */}
+      {/* (Keep the rest of the file exactly as it was in previous response) */}
       <div className="bg-white rounded-[4rem] p-16 border border-slate-200 shadow-sm space-y-16">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
            <div className="flex items-center gap-6">
