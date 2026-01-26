@@ -10,7 +10,7 @@ import {
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
-// --- COMPONENT: AutoSaveInput (Fixes Chinese Glitch) ---
+// --- 1. COMPONENT: AutoSaveInput (Fixes Chinese Glitch) ---
 const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }: any) => {
   const [localValue, setLocalValue] = useState(value || '');
 
@@ -36,7 +36,7 @@ const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }:
   );
 };
 
-// --- CONSTANTS ---
+// --- 2. FIXED CONSTANTS: Ensures Attendance Buttons Always Work ---
 const ATTENDANCE_OPTIONS = ['PRESENT', 'ABSENT', 'LATE'];
 
 interface ClassDetailsProps {
@@ -71,11 +71,12 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [examColumns, setExamColumns] = useState(['Mid-Term', 'Final Exam']);
   const [selectedGraphExam, setSelectedGraphExam] = useState(examColumns[0]);
 
-  // --- LOGIC: Check if selected date is a Test Day ---
+  // --- 3. LOGIC: Smart Test Day Detection ---
   const isTestDay = useMemo(() => {
     const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
     if (!plan) return false;
-    const cat = plan.category.toLowerCase();
+    const cat = (plan.category || '').toLowerCase();
+    // Keywords to trigger the Marks Column
     return cat.includes('test') || cat.includes('exam') || cat.includes('assessment') || cat.includes('quiz');
   }, [lessonPlans, cls.id, selectedDate]);
 
@@ -142,14 +143,16 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // --- ATTENDANCE FIX ---
+  // --- 4. FIXED ATTENDANCE HANDLER ---
   const handleAttendanceChange = async (studentId: string, status: string) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    // UNDO: If clicking the same status, delete the record
+    // UNDO Logic: If clicking the same status, remove it.
     if (existing?.status === status) {
-      try { await deleteDoc(doc(db, 'attendance', recordId)); } catch (err) { console.error(err); }
+      try { 
+        await deleteDoc(doc(db, 'attendance', recordId)); 
+      } catch (err) { console.error(err); }
       return;
     }
 
@@ -166,7 +169,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     await setDoc(doc(db, 'attendance', recordId), record);
   };
 
-  // COLOR FIX: Explicitly match the requested colors
+  // --- 5. FIXED BUTTON COLORS (Green/Red/Yellow) ---
   const getAttendanceBtnColor = (status: string, isActive: boolean) => {
     if (!isActive) return 'bg-slate-50 text-slate-400 hover:bg-slate-200 border border-slate-100';
     
@@ -265,7 +268,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
-        {/* LEFT COLUMN: ARCHIVE */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <div className="flex items-center justify-between mb-10">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -294,7 +296,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
-        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -319,9 +320,10 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
               <table className="w-full text-left border-collapse min-w-[900px]">
                 <thead className="sticky top-0 bg-slate-50 z-30">
                   <tr className="border-b border-slate-200">
-                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100">Student</th>
+                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Student</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
+                    {/* CONDITIONAL COLUMN: Marks vs Metric */}
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right">
                       {isTestDay ? 'Marks (%)' : 'Metric'}
                     </th>
@@ -332,7 +334,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     const record = attendance.find(a => a.id === `${cls.id}-${student.id}-${selectedDate}`);
                     return (
                       <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-100">
+                        <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
                           <div className="flex items-center gap-4">
                             <div className="relative">
                               <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary text-xs shadow-inner">{student.name.charAt(0)}</div>
@@ -344,7 +346,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                         <td className="px-6 py-6">
                           <div className="flex flex-col items-center gap-2">
                             <div className="flex justify-center gap-2">
-                              {/* FIXED BUTTONS HERE */}
+                              {/* 6. FIXED BUTTON RENDERING */}
                               {ATTENDANCE_OPTIONS.map(status => (
                                 <button 
                                   key={status} 
@@ -370,6 +372,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                           </div>
                         </td>
                         <td className="px-6 py-6">
+                          {/* Chinese Input Fix */}
                           <AutoSaveInput 
                             className="w-full text-xs font-bold p-4 bg-slate-50 border border-slate-100 rounded-[1.5rem] outline-none focus:bg-white focus:theme-border transition-all"
                             placeholder="Observational feedback..."
@@ -403,8 +406,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
         </div>
       </div>
 
-      {/* EXAM CORE SECTION OMITTED FOR BREVITY - REMAINS SAME */}
-      {/* (Keep the rest of the file exactly as it was in previous response) */}
+      {/* EXAM CORE SECTION */}
       <div className="bg-white rounded-[4rem] p-16 border border-slate-200 shadow-sm space-y-16">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
            <div className="flex items-center gap-6">
