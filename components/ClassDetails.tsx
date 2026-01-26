@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   ChevronLeft, Plus, Edit, FileText, CheckCircle2, Clock, Trash2, 
-  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter
+  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator
 } from 'lucide-react';
 import { 
   Class, User, LessonPlan, AttendanceRecord, SystemSettings, 
@@ -9,6 +9,35 @@ import {
 } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+
+// --- COMPONENT: AutoSaveInput (Fixes Chinese Glitch) ---
+const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }: any) => {
+  const [localValue, setLocalValue] = useState(value || '');
+
+  // Sync with prop only if it changes externally (and isn't the one we just saved)
+  useEffect(() => {
+    setLocalValue(value || '');
+  }, [value]);
+
+  const handleBlur = () => {
+    // Only save if value is different to prevent loops
+    if (localValue !== value) {
+      onSave(localValue);
+    }
+  };
+
+  return (
+    <input
+      type={type}
+      className={className}
+      placeholder={placeholder}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={handleBlur}
+    />
+  );
+};
+// ------------------------------------------------
 
 interface ClassDetailsProps {
   cls: Class;
@@ -23,7 +52,7 @@ interface ClassDetailsProps {
   onBack: () => void;
   onDeletePlan: (id: string) => void;
   updateClass: (cls: Class | any) => void;
-  currentUser: User | null; // <--- ADDED THIS
+  currentUser: User | null;
 }
 
 const ClassDetails: React.FC<ClassDetailsProps> = ({ 
@@ -42,7 +71,15 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [examColumns, setExamColumns] = useState(['Mid-Term', 'Final Exam']);
   const [selectedGraphExam, setSelectedGraphExam] = useState(examColumns[0]);
 
-  // Safety check: Ensure the array exists before filtering
+  // --- LOGIC: Check if selected date is a Test Day ---
+  const isTestDay = useMemo(() => {
+    const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
+    if (!plan) return false;
+    const cat = plan.category.toLowerCase();
+    // Returns true if category matches any of these keywords
+    return cat.includes('test') || cat.includes('exam') || cat.includes('assessment') || cat.includes('quiz');
+  }, [lessonPlans, cls.id, selectedDate]);
+
   const currentEnrolledIds = cls.enrolledStudentIds || [];
 
   const enrolledStudents = useMemo(() => 
@@ -94,7 +131,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       setShowPlanningModal(false);
     } catch (err) {
       console.error("Save plan failed:", err);
-      alert("Permission denied. Ensure Firestore rules are set to public for authenticated users.");
+      alert("Permission denied.");
     }
   };
 
@@ -111,11 +148,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     const existing = attendance.find(a => a.id === recordId);
     
     if (existing?.status === status) {
-      try {
-        await deleteDoc(doc(db, 'attendance', recordId));
-      } catch (err) {
-        console.error("Failed to delete record:", err);
-      }
+      try { await deleteDoc(doc(db, 'attendance', recordId)); } catch (err) { console.error(err); }
       return;
     }
 
@@ -126,23 +159,27 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       date: selectedDate,
       status,
       performanceComment: existing?.performanceComment || '',
-      reason: existing?.reason || ''
+      reason: existing?.reason || '',
+      testScore: existing?.testScore // Keep existing score if any
     };
     await setDoc(doc(db, 'attendance', recordId), record);
   };
 
-  const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: string) => {
+  const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: any) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
+    
     const record: AttendanceRecord = {
       id: recordId,
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status: existing?.status || AttendanceStatus.PRESENT,
+      status: existing?.status || AttendanceStatus.PRESENT, // Default to Present if just marking info
       performanceComment: existing?.performanceComment || '',
+      reason: existing?.reason || '',
+      testScore: existing?.testScore,
       [field]: value
-    } as AttendanceRecord;
+    };
     await setDoc(doc(db, 'attendance', recordId), record);
   };
 
@@ -163,20 +200,12 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     await setDoc(doc(db, 'examResults', examId), record);
   };
 
-  // --- CRITICAL FIX: Enhanced Enrollment Logic ---
   const handleEnroll = (studentId: string) => {
     const currentList = cls.enrolledStudentIds || [];
     if (!currentList.includes(studentId)) {
       const newList = [...currentList, studentId];
-      
-      const updatedClass = { 
-        ...cls, 
-        // 1. Update the correct field
-        enrolledStudentIds: newList,
-        // 2. Also update the legacy field to ensure compatibility with old data readers
-        studentIds: newList 
-      };
-      
+      // Update both legacy and new fields
+      const updatedClass = { ...cls, enrolledStudentIds: newList, studentIds: newList };
       updateClass(updatedClass);
     }
   };
@@ -185,16 +214,10 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     if (window.confirm("Remove this student from the class?")) {
       const currentList = cls.enrolledStudentIds || [];
       const newList = currentList.filter(id => id !== studentId);
-      
-      const updatedClass = {
-        ...cls,
-        enrolledStudentIds: newList,
-        studentIds: newList // Keep sync
-      };
+      const updatedClass = { ...cls, enrolledStudentIds: newList, studentIds: newList };
       updateClass(updatedClass);
     }
   };
-  // ------------------------------------------------
 
   const analyticsData = useMemo(() => {
     const data = enrolledStudents.map(s => {
@@ -240,6 +263,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+        {/* LEFT COLUMN: ARCHIVE */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <div className="flex items-center justify-between mb-10">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -255,7 +279,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                       {lp.status === TaskStatus.COMPLETE ? <CheckCircle2 className="w-7 h-7" /> : <Clock className="w-7 h-7" />}
                     </div>
                     <div>
-                      <p className="text-lg font-black text-slate-800">{lp.date}</p>
+                      <p className="text-lg font-black text-slate-800">{lp.date.split('-').reverse().join('/')}</p>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{lp.category}</p>
                     </div>
                   </div>
@@ -268,6 +292,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
+        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -287,13 +312,18 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                 }} className="p-3 bg-white rounded-2xl shadow-sm hover:bg-slate-50 transition-all"><ChevronRight className="w-5 h-5" /></button>
               </div>
            </div>
+           
            <div className="flex-1 overflow-x-auto custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[900px]">
                 <thead className="sticky top-0 bg-slate-50 z-30">
                   <tr className="border-b border-slate-200">
-                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Student</th>
+                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100">Student</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
+                    {/* CONDITIONAL COLUMN: Only show Marks if it is a Test Day */}
+                    <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right">
+                      {isTestDay ? 'Marks (%)' : 'Metric'}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -301,17 +331,11 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     const record = attendance.find(a => a.id === `${cls.id}-${student.id}-${selectedDate}`);
                     return (
                       <tr key={student.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                        <td className="px-6 py-6 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-100">
                           <div className="flex items-center gap-4">
                             <div className="relative">
                               <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary text-xs shadow-inner">{student.name.charAt(0)}</div>
-                              <button 
-                                onClick={() => handleRemoveStudent(student.id)}
-                                title="Remove Student"
-                                className="absolute -top-2 -right-2 bg-white border border-slate-200 text-red-400 p-1 rounded-full shadow-sm hover:text-red-600 transition-all opacity-0 group-hover:opacity-100"
-                              >
-                                <UserMinus className="w-3 h-3" />
-                              </button>
+                              <button onClick={() => handleRemoveStudent(student.id)} title="Remove" className="absolute -top-2 -right-2 bg-white border border-slate-200 text-red-400 p-1 rounded-full shadow-sm hover:text-red-600 transition-all opacity-0 group-hover:opacity-100"><UserMinus className="w-3 h-3" /></button>
                             </div>
                             <span className="font-black text-slate-800 text-sm whitespace-nowrap">{student.name}</span>
                           </div>
@@ -324,11 +348,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                               ))}
                             </div>
                             {record?.status === AttendanceStatus.ABSENT && (
-                              <select 
-                                className="w-full mt-1 p-2 bg-red-50 border border-red-100 rounded-lg text-[9px] font-black text-red-700 outline-none"
-                                value={record.reason || ''}
-                                onChange={(e) => updateAttendanceField(student.id, 'reason', e.target.value)}
-                              >
+                              <select className="w-full mt-1 p-2 bg-red-50 border border-red-100 rounded-lg text-[9px] font-black text-red-700 outline-none" value={record.reason || ''} onChange={(e) => updateAttendanceField(student.id, 'reason', e.target.value)}>
                                 <option value="">Select Reason...</option>
                                 {settings.absentReasons.map(r => <option key={r} value={r}>{r}</option>)}
                               </select>
@@ -336,24 +356,41 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                           </div>
                         </td>
                         <td className="px-6 py-6">
-                          <input placeholder="Observational feedback..." className="w-full text-xs font-bold p-4 bg-slate-50 border border-slate-100 rounded-[1.5rem] outline-none focus:bg-white focus:theme-border transition-all" value={record?.performanceComment || ''} onChange={e => updateAttendanceField(student.id, 'performanceComment', e.target.value)} />
+                          {/* USE AutoSaveInput TO FIX CHINESE GLITCH */}
+                          <AutoSaveInput 
+                            className="w-full text-xs font-bold p-4 bg-slate-50 border border-slate-100 rounded-[1.5rem] outline-none focus:bg-white focus:theme-border transition-all"
+                            placeholder="Observational feedback..."
+                            value={record?.performanceComment || ''}
+                            onSave={(val: string) => updateAttendanceField(student.id, 'performanceComment', val)}
+                          />
+                        </td>
+                        <td className="px-6 py-6 text-right font-black text-slate-800 text-sm">
+                          {isTestDay ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <Calculator className="w-4 h-4 text-slate-300" />
+                              <AutoSaveInput 
+                                type="number"
+                                className="w-16 bg-white border border-slate-200 p-2 rounded-xl text-center outline-none focus:theme-border font-black"
+                                placeholder="0"
+                                value={record?.testScore || ''}
+                                onSave={(val: string) => updateAttendanceField(student.id, 'testScore', parseFloat(val))}
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-slate-300">--</span>
+                          )}
                         </td>
                       </tr>
                     );
                   })}
-                  {enrolledStudents.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
-                        No students enrolled in this node yet.
-                      </td>
-                    </tr>
-                  )}
+                  {enrolledStudents.length === 0 && <tr><td colSpan={4} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">No students enrolled.</td></tr>}
                 </tbody>
               </table>
            </div>
         </div>
       </div>
 
+      {/* EXAM CORE SECTION */}
       <div className="bg-white rounded-[4rem] p-16 border border-slate-200 shadow-sm space-y-16">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
            <div className="flex items-center gap-6">
@@ -436,7 +473,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     <div className="flex-1 h-8 bg-white rounded-xl border border-slate-100 relative shadow-sm">
                        <div className="h-full theme-bg transition-all duration-1000 rounded-r-lg overflow-hidden" style={{ width: `${student.current}%`, backgroundColor: cls.themeColor }} />
                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-700">{student.current}%</span>
-                       
                        <div className="absolute top-0 bottom-0 border-r-2 border-dotted border-black z-20 pointer-events-none transition-all duration-500" style={{ left: `${analyticsData.average}%` }} />
                     </div>
                   </div>
@@ -465,53 +501,15 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                   </select>
                 </div>
               </div>
-              
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Objectives</label>
-                <textarea placeholder="Outline goals..." className="w-full h-32 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-medium leading-relaxed text-sm" value={lpFormData.text} onChange={e => setLpFormData({...lpFormData, text: e.target.value})} />
-              </div>
-
+              <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Objectives</label><textarea placeholder="Outline goals..." className="w-full h-32 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none font-medium leading-relaxed text-sm" value={lpFormData.text} onChange={e => setLpFormData({...lpFormData, text: e.target.value})} /></div>
               <div className="space-y-4">
-                <div className="flex items-center justify-between px-1">
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Materials</label>
-                   <button onClick={() => fileInputRef.current?.click()} className="text-[10px] font-black theme-primary uppercase hover:underline flex items-center gap-1">
-                     <Paperclip className="w-3.5 h-3.5" /> Upload
-                   </button>
-                </div>
+                <div className="flex items-center justify-between px-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Materials</label><button onClick={() => fileInputRef.current?.click()} className="text-[10px] font-black theme-primary uppercase hover:underline flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" /> Upload</button></div>
                 <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-                <div className="flex flex-wrap gap-2">
-                  {lpFormData.materials?.map((m, i) => (
-                    <div key={i} className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold text-slate-700">
-                      <File className="w-3 h-3 theme-primary" />
-                      <span className="truncate max-w-[150px]">{m.name}</span>
-                      <button onClick={() => setLpFormData(p => ({ ...p, materials: p.materials?.filter((_, idx) => idx !== i) }))} className="text-red-400 ml-1"><X className="w-3 h-3" /></button>
-                    </div>
-                  ))}
-                </div>
+                <div className="flex flex-wrap gap-2">{lpFormData.materials?.map((m, i) => (<div key={i} className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold text-slate-700"><File className="w-3 h-3 theme-primary" /><span className="truncate max-w-[150px]">{m.name}</span><button onClick={() => setLpFormData(p => ({ ...p, materials: p.materials?.filter((_, idx) => idx !== i) }))} className="text-red-400 ml-1"><X className="w-3 h-3" /></button></div>))}</div>
               </div>
-
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Status</label>
-                 <div className="flex gap-2">
-                   {[TaskStatus.HAVENT_START, TaskStatus.DOING, TaskStatus.COMPLETE].map(status => (
-                     <button
-                        key={status}
-                        onClick={() => setLpFormData({...lpFormData, status})}
-                        className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-                          lpFormData.status === status ? getStatusColor(status) + ' text-white border-transparent' : 'bg-slate-50 text-slate-400 border-slate-100'
-                        }`}
-                     >
-                        {status.replace('_', ' ')}
-                     </button>
-                   ))}
-                 </div>
-              </div>
+              <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Status</label><div className="flex gap-2">{[TaskStatus.HAVENT_START, TaskStatus.DOING, TaskStatus.COMPLETE].map(status => (<button key={status} onClick={() => setLpFormData({...lpFormData, status})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${lpFormData.status === status ? getStatusColor(status) + ' text-white border-transparent' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{status.replace('_', ' ')}</button>))}</div></div>
             </div>
-
-            <div className="mt-12 flex gap-4">
-              <button onClick={() => setShowPlanningModal(false)} className="flex-1 py-5 bg-slate-50 text-slate-500 font-black uppercase text-xs rounded-2xl">Discard</button>
-              <button onClick={handleSaveLessonPlan} className="flex-1 py-5 theme-bg text-white font-black uppercase text-xs rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all">Finalize Plan</button>
-            </div>
+            <div className="mt-12 flex gap-4"><button onClick={() => setShowPlanningModal(false)} className="flex-1 py-5 bg-slate-50 text-slate-500 font-black uppercase text-xs rounded-2xl">Discard</button><button onClick={handleSaveLessonPlan} className="flex-1 py-5 theme-bg text-white font-black uppercase text-xs rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all">Finalize Plan</button></div>
           </div>
         </div>
       )}
@@ -524,48 +522,17 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
               <button onClick={() => setShowEnrolModal(false)} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-full transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
             <div className="flex flex-col md:flex-row gap-4 mb-6">
-               <div className="relative flex-1">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input className="w-full py-5 pl-14 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold" placeholder="Query registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-               </div>
-               <div className="relative min-w-[150px]">
-                  <Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <select 
-                    className="w-full py-5 pl-12 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold text-sm appearance-none"
-                    value={filterStandard}
-                    onChange={e => setFilterStandard(e.target.value)}
-                  >
-                    <option value="">All Forms</option>
-                    {availableStandards.map(std => (
-                      <option key={std} value={std}>{std}</option>
-                    ))}
-                  </select>
-               </div>
+               <div className="relative flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input className="w-full py-5 pl-14 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold" placeholder="Query registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+               <div className="relative min-w-[150px]"><Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /><select className="w-full py-5 pl-12 pr-6 bg-slate-50 border border-slate-200 rounded-[2rem] outline-none theme-ring font-bold text-sm appearance-none" value={filterStandard} onChange={e => setFilterStandard(e.target.value)}><option value="">All Forms</option>{availableStandards.map(std => (<option key={std} value={std}>{std}</option>))}</select></div>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 pr-4 custom-scrollbar">
-              {students
-                .filter(s => 
-                  !(cls.enrolledStudentIds || []).includes(s.id) && 
-                  (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) &&
-                  (filterStandard === '' || s.standard === filterStandard)
-                )
-                .map(student => (
+              {students.filter(s => !(cls.enrolledStudentIds || []).includes(s.id) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) && (filterStandard === '' || s.standard === filterStandard)).map(student => (
                 <div key={student.id} className="p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-all group">
-                  <div className="flex items-center gap-4">
-                     <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary">{student.name.charAt(0)}</div>
-                     <div>
-                        <p className="font-black text-slate-800">{student.name}</p>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{student.standard || 'No Form'}</p>
-                     </div>
-                  </div>
+                  <div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center font-black theme-primary">{student.name.charAt(0)}</div><div><p className="font-black text-slate-800">{student.name}</p><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{student.standard || 'No Form'}</p></div></div>
                   <button onClick={() => handleEnroll(student.id)} className="p-4 theme-bg text-white rounded-2xl shadow-lg hover:scale-105 transition-all"><Plus className="w-5 h-5" /></button>
                 </div>
               ))}
-              {students.filter(s => !(cls.enrolledStudentIds || []).includes(s.id) && (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || (s.standard && s.standard.toLowerCase().includes(searchTerm.toLowerCase()))) && (filterStandard === '' || s.standard === filterStandard)).length === 0 && (
-                <div className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
-                  No matching students found in registry.
-                </div>
-              )}
+              {students.filter(s => !(cls.enrolledStudentIds || []).includes(s.id)).length === 0 && <div className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">No matching students found in registry.</div>}
             </div>
           </div>
         </div>
