@@ -91,7 +91,6 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // --- HELPER: Get Status Icon ---
   const getPlanStatusIcon = (status: string) => {
     switch (status) {
       case 'HAVENT_START': return '🔴';
@@ -168,13 +167,11 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                           const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
                           const hourClasses = dayClasses.filter(c => parseInt(c.classTime.split(':')[0]) === hour);
                           
-                          // Convert date to string for lesson plan matching
                           const dateStr = toLocalDateString(date);
 
                           return (
                             <div key={dayIdx} className="flex-1 p-1 flex flex-col gap-1 border-r border-slate-50 last:border-r-0 relative">
                                {hourClasses.map(cls => {
-                                 // Find matching lesson plan for this class on this day
                                  const activePlan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === dateStr);
                                  
                                  return (
@@ -187,12 +184,12 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                                       <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
                                       <p className="text-[9px] font-black leading-tight line-clamp-1">{cls.name}</p>
                                       
-                                      {/* --- LESSON PLAN STATUS INDICATOR --- */}
+                                      {/* --- LESSON PLAN INDICATOR (TEXT WRAPPING FIX) --- */}
                                       {activePlan && (
-                                        <div className="mt-1.5 flex items-center gap-1.5 bg-black/20 rounded-lg px-2 py-1 backdrop-blur-sm w-fit max-w-full">
-                                           <span className="text-[8px] leading-none shrink-0">{getPlanStatusIcon(activePlan.status)}</span>
-                                           <span className="text-[8px] font-bold text-white/90 truncate">
-                                             {activePlan.text || activePlan.category} {/* Shows Outline if available */}
+                                        <div className="mt-1.5 flex items-start gap-1.5 bg-black/20 rounded-lg px-2 py-1 backdrop-blur-sm w-full">
+                                           <span className="text-[8px] leading-tight shrink-0 mt-[1px]">{getPlanStatusIcon(activePlan.status)}</span>
+                                           <span className="text-[8px] font-bold text-white/90 break-words whitespace-normal leading-tight">
+                                             {activePlan.text || activePlan.category}
                                            </span>
                                         </div>
                                       )}
