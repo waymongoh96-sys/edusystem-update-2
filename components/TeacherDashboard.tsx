@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { 
   Calendar as CalendarIcon, Clock, CheckCircle2, 
@@ -16,7 +15,7 @@ interface DashboardProps {
 }
 
 const TeacherDashboard: React.FC<DashboardProps> = ({ 
-  tasks, classes, settings, onClassClick, onTaskClick 
+  tasks, classes, lessonPlans, settings, onClassClick, onTaskClick 
 }) => {
   const [viewMode, setViewMode] = useState<'WEEK' | 'MONTH'>('WEEK');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -47,7 +46,6 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
       return d;
     });
 
-    // Filter by working days from settings
     if (settings.workingDays && settings.workingDays.length > 0) {
       return allWeek.filter(d => settings.workingDays.includes(d.toLocaleDateString('en-US', { weekday: 'long' })));
     }
@@ -90,6 +88,16 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
       case TaskStatus.DOING: return 'bg-amber-400';
       case TaskStatus.COMPLETE: return 'bg-emerald-500';
       default: return 'bg-slate-400';
+    }
+  };
+
+  // --- HELPER: Get Status Icon ---
+  const getPlanStatusIcon = (status: string) => {
+    switch (status) {
+      case 'HAVENT_START': return '🔴';
+      case 'DOING': return '🟡';
+      case 'COMPLETE': return '🟢';
+      default: return '⚪';
     }
   };
 
@@ -152,28 +160,47 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                {/* Body Grid */}
                <div className="flex-1 overflow-y-auto custom-scrollbar relative">
                   {dynamicHours.map(hour => (
-                    <div key={hour} className="flex min-h-[80px] border-b border-slate-50 last:border-b-0">
+                    <div key={hour} className="flex min-h-[90px] border-b border-slate-50 last:border-b-0">
                        <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center">
                           <span className="text-[10px] font-black text-slate-400">{hour.toString().padStart(2, '0')}:00</span>
                        </div>
                        {currentWeekDates.map((date, dayIdx) => {
                           const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
                           const hourClasses = dayClasses.filter(c => parseInt(c.classTime.split(':')[0]) === hour);
+                          
+                          // Convert date to string for lesson plan matching
+                          const dateStr = toLocalDateString(date);
+
                           return (
                             <div key={dayIdx} className="flex-1 p-1 flex flex-col gap-1 border-r border-slate-50 last:border-r-0 relative">
-                               {hourClasses.map(cls => (
-                                 <div 
-                                   key={cls.id} 
-                                   onClick={() => onClassClick(cls.id)}
-                                   className="p-2 rounded-xl text-white shadow-sm hover:brightness-95 transition-all cursor-pointer group h-full flex flex-col justify-center"
-                                   style={{ backgroundColor: cls.themeColor }}
-                                 >
-                                    <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
-                                    <p className="text-[9px] font-black leading-tight line-clamp-2">{cls.name}</p>
-                                 </div>
-                               ))}
+                               {hourClasses.map(cls => {
+                                 // Find matching lesson plan for this class on this day
+                                 const activePlan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === dateStr);
+                                 
+                                 return (
+                                   <div 
+                                     key={cls.id} 
+                                     onClick={() => onClassClick(cls.id)}
+                                     className="p-2 rounded-xl text-white shadow-sm hover:brightness-95 transition-all cursor-pointer group h-full flex flex-col justify-center"
+                                     style={{ backgroundColor: cls.themeColor }}
+                                   >
+                                      <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
+                                      <p className="text-[9px] font-black leading-tight line-clamp-1">{cls.name}</p>
+                                      
+                                      {/* --- LESSON PLAN STATUS INDICATOR --- */}
+                                      {activePlan && (
+                                        <div className="mt-1.5 flex items-center gap-1.5 bg-black/20 rounded-lg px-2 py-1 backdrop-blur-sm w-fit max-w-full">
+                                           <span className="text-[8px] leading-none shrink-0">{getPlanStatusIcon(activePlan.status)}</span>
+                                           <span className="text-[8px] font-bold text-white/90 truncate">
+                                             {activePlan.text || activePlan.category} {/* Shows Outline if available */}
+                                           </span>
+                                        </div>
+                                      )}
+                                   </div>
+                                 );
+                               })}
                                {hour === 9 && isHoliday && (
-                                  <div className="absolute inset-x-1 top-1 p-2 rounded-xl bg-red-50 border border-red-100 z-10" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
+                                  <div className="absolute inset-x-1 top-1 p-2 rounded-xl bg-red-50 border border-red-100 z-10 shadow-sm" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
                                      <p className="text-[7px] font-black text-red-600 uppercase">Holiday</p>
                                      <p className="text-[8px] font-bold text-red-800 truncate">{isHoliday.description}</p>
                                   </div>
