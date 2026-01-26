@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { User, UserStatus, Class, Role } from '../types';
 import { 
   Plus, Users, Edit, Filter, Trash2, BookOpen, 
-  Briefcase, GraduationCap, Clock, Upload, X, AlertTriangle
+  Briefcase, GraduationCap, AlertTriangle, Clock, Upload, X
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
@@ -21,6 +21,8 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
   const [isBulkImporting, setIsBulkImporting] = useState(false);
   const [bulkData, setBulkData] = useState('');
   const [teacherFilter, setTeacherFilter] = useState('ALL');
+  
+  // Initialize formData with explicit defaults for Student fields
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1'
   });
@@ -71,7 +73,18 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     const id = editingUserId || Date.now().toString();
     const role = activeTab === 'TEACHER' ? 'TEACHER' : 'STUDENT';
     const collectionName = role === 'TEACHER' ? 'teachers' : 'students';
-    await setDoc(doc(db, collectionName, id), { ...formData as User, id, role });
+    
+    // Ensure all fields are present
+    const userToSave = { 
+        ...formData, 
+        id, 
+        role,
+        // Ensure student fields are saved even if not touched
+        age: formData.age || 10,
+        standard: formData.standard || '1'
+    } as User;
+
+    await setDoc(doc(db, collectionName, id), userToSave);
     setIsAdding(false);
     setEditingUserId(null);
     setFormData({ name: '', username: '', password: '', status: UserStatus.ACTIVE, age: 10, standard: '1' });
@@ -110,7 +123,12 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
 
   const handleEdit = (user: User) => {
     setEditingUserId(user.id);
-    setFormData(user);
+    // Explicitly set these fields to prevent them from being undefined
+    setFormData({
+        ...user,
+        age: user.age || 10,
+        standard: user.standard || ''
+    });
     setIsAdding(true);
   };
 
@@ -190,7 +208,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
         </table>
       </div>
 
-      {/* Modals for Add/Edit/Restore omitted for brevity - reuse from previous if needed, logic is same */}
+      {/* Modals */}
       {isBulkImporting && (
         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white p-8 rounded-3xl w-full max-w-lg shadow-2xl">
@@ -200,14 +218,40 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           </div>
         </div>
       )}
+      
       {isAdding && (
         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white p-8 rounded-3xl w-full max-w-md shadow-2xl">
-             <div className="flex justify-between mb-4"><h2 className="text-2xl font-black">Manage Account</h2><button onClick={() => setIsAdding(false)}><X /></button></div>
+             <div className="flex justify-between mb-4"><h2 className="text-2xl font-black">Manage {activeTab === 'TEACHER' ? 'Staff' : 'Student'}</h2><button onClick={() => setIsAdding(false)}><X /></button></div>
              <form onSubmit={handleSave} className="space-y-4">
-                <input className="w-full border p-3 rounded-xl" placeholder="Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                <input className="w-full border p-3 rounded-xl" placeholder="Username" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} />
-                <button className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Save</button>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Name</label><input className="w-full border p-3 rounded-xl" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Username</label><input className="w-full border p-3 rounded-xl" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Password</label><input className="w-full border p-3 rounded-xl" type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} /></div>
+                
+                {/* --- FIX: STUDENT FIELDS (Age & Standard) --- */}
+                {activeTab === 'STUDENT' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Age</label>
+                      <input 
+                        type="number" 
+                        className="w-full border p-3 rounded-xl" 
+                        value={formData.age || ''} 
+                        onChange={e => setFormData({...formData, age: parseInt(e.target.value) || 0})} 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Standard</label>
+                      <input 
+                        className="w-full border p-3 rounded-xl" 
+                        value={formData.standard || ''} 
+                        onChange={e => setFormData({...formData, standard: e.target.value})} 
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                <button className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold mt-2">Save Record</button>
              </form>
           </div>
         </div>
