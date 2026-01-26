@@ -1,361 +1,234 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Calendar as CalendarIcon, Clock, CheckCircle2, 
-  ChevronLeft, ChevronRight, ListChecks, ArrowRight, X, AlertCircle, Eye, EyeOff
+  GraduationCap, BookOpen, Calendar, Clock, TrendingUp, 
+  CheckCircle2, AlertCircle, ChevronLeft, BarChart3, Sparkles, FileText
 } from 'lucide-react';
-import { Task, Class, SystemSettings, TaskStatus } from '../types';
+import { GoogleGenAI } from "@google/genai";
+import { User, Class, AttendanceRecord, ExamResult, AttendanceStatus } from '../types';
 
-interface DashboardProps {
-  tasks: Task[];
+interface StudentDashboardProps {
+  student: User;
   classes: Class[];
-  lessonPlans: any[];
-  settings: SystemSettings;
-  onClassClick: (id: string) => void;
-  onTaskClick: () => void;
+  attendance: AttendanceRecord[];
+  examResults: ExamResult[];
 }
 
-const TeacherDashboard: React.FC<DashboardProps> = ({ 
-  tasks, classes, lessonPlans, settings, onClassClick, onTaskClick 
+const StudentDashboard: React.FC<StudentDashboardProps> = ({ 
+  student, classes, attendance, examResults 
 }) => {
-  const [viewMode, setViewMode] = useState<'WEEK' | 'MONTH'>('WEEK');
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedEvent, setSelectedEvent] = useState<any>(null);
-  const today = new Date();
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
 
-  const toLocalDateString = (date: Date) => {
-    const offset = date.getTimezoneOffset();
-    const adjustedDate = new Date(date.getTime() - (offset * 60 * 1000));
-    return adjustedDate.toISOString().split('T')[0];
-  };
-
-  const dynamicHours = useMemo(() => {
-    const start = settings.startHour ?? 7;
-    const end = settings.endHour ?? 19;
-    return Array.from({ length: end - start + 1 }, (_, i) => i + start);
-  }, [settings.startHour, settings.endHour]);
-
-  const currentWeekDates = useMemo(() => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    start.setDate(diff);
-    
-    const allWeek = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      return d;
+  // FIX: Updated logic to check BOTH new and legacy fields
+  const enrolledClasses = useMemo(() => {
+    return classes.filter(c => {
+      // 1. Get the list (handle new field, old field, or empty)
+      const ids = c.enrolledStudentIds || (c as any).studentIds || [];
+      // 2. Safely check if student is included
+      return Array.isArray(ids) && ids.includes(student.id);
     });
+  }, [classes, student.id]);
 
-    if (settings.workingDays && settings.workingDays.length > 0) {
-      return allWeek.filter(d => settings.workingDays.includes(d.toLocaleDateString('en-US', { weekday: 'long' })));
-    }
-    return allWeek;
-  }, [currentDate, settings.workingDays]);
-
-  const daysInMonth = useMemo(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    const firstDay = new Date(year, month, 1).getDay();
-    const adjustedFirstDay = firstDay === 0 ? 6 : firstDay - 1;
-    return { lastDay, adjustedFirstDay };
-  }, [currentDate]);
-
-  const handlePrev = () => {
-    const d = new Date(currentDate);
-    viewMode === 'WEEK' ? d.setDate(d.getDate() - 7) : d.setMonth(d.getMonth() - 1);
-    setCurrentDate(d);
-  };
-
-  const handleNext = () => {
-    const d = new Date(currentDate);
-    viewMode === 'WEEK' ? d.setDate(d.getDate() + 7) : d.setMonth(d.getMonth() + 1);
-    setCurrentDate(d);
-  };
-
-  const getEventsForDate = (date: Date) => {
-    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-    const dateStr = toLocalDateString(date);
-    const dayClasses = classes.filter(c => c.classDay === dayName);
-    const dayTasks = tasks.filter(t => t.dueDate === dateStr && t.status !== TaskStatus.COMPLETE);
-    const isHoliday = settings.holidays.find(h => h.date === dateStr);
-    return { dayClasses, dayTasks, isHoliday };
-  };
-
-  const getStatusColor = (status: TaskStatus) => {
-    switch(status) {
-      case TaskStatus.HAVENT_START: return 'bg-red-500';
-      case TaskStatus.DOING: return 'bg-amber-400';
-      case TaskStatus.COMPLETE: return 'bg-emerald-500';
-      default: return 'bg-slate-400';
-    }
-  };
-
-  // --- HELPER: Get Status Icon ---
-  const getPlanStatusIcon = (status: string) => {
-    switch (status) {
-      case 'HAVENT_START': return '🔴';
-      case 'DOING': return '🟡';
-      case 'COMPLETE': return '🟢';
-      default: return '⚪';
-    }
-  };
+  if (selectedClassId) {
+    const cls = enrolledClasses.find(c => c.id === selectedClassId);
+    return cls ? (
+      <StudentClassView 
+        cls={cls} 
+        student={student} 
+        attendance={attendance.filter(a => a.classId === cls.id && a.studentId === student.id)} 
+        examResults={examResults.filter(r => r.classId === cls.id && r.studentId === student.id)}
+        onBack={() => setSelectedClassId(null)} 
+      />
+    ) : null;
+  }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-black text-slate-800 tracking-tight">System Terminal</h1>
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Operational Overview</p>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Academic Portal</h1>
+          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Learner: {student.name}</p>
         </div>
-        
-        <div className="flex items-center gap-4 bg-white p-2 rounded-[2rem] border border-slate-200 shadow-sm">
-          <div className="flex bg-slate-100 p-1 rounded-2xl">
-            <button 
-              onClick={() => setViewMode('WEEK')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black transition-all ${viewMode === 'WEEK' ? 'bg-white shadow-sm theme-primary' : 'text-slate-500'}`}
-            >
-              WEEK
-            </button>
-            <button 
-              onClick={() => setViewMode('MONTH')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black transition-all ${viewMode === 'MONTH' ? 'bg-white shadow-sm theme-primary' : 'text-slate-500'}`}
-            >
-              MONTH
-            </button>
-          </div>
-          <div className="h-6 w-px bg-slate-200" />
-          <div className="flex items-center gap-2">
-            <button onClick={handlePrev} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-5 h-5" /></button>
-            <span className="font-black text-[11px] uppercase tracking-widest min-w-[120px] text-center">
-              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </span>
-            <button onClick={handleNext} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronRight className="w-5 h-5" /></button>
-          </div>
+        <div className="bg-white border border-slate-200 px-6 py-4 rounded-3xl shadow-sm flex items-center gap-4">
+           <div className="w-10 h-10 theme-light-bg rounded-xl flex items-center justify-center"><BookOpen className="w-5 h-5 theme-primary" /></div>
+           <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Enrolled Labs</p><p className="text-sm font-black text-slate-800">{enrolledClasses.length} Classes</p></div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 h-[calc(100vh-18rem)]">
-        <div className="xl:col-span-8 overflow-hidden h-full">
-          {viewMode === 'WEEK' ? (
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
-               {/* Header Row */}
-               <div className="flex border-b border-slate-100 bg-slate-50/50">
-                  <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center flex flex-col justify-center">
-                     <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Time</span>
-                  </div>
-                  {currentWeekDates.map((date, idx) => {
-                    const isToday = date.toDateString() === today.toDateString();
-                    return (
-                      <div key={idx} className={`flex-1 p-4 text-center border-r border-slate-100 last:border-r-0 ${isToday ? 'theme-light-bg' : ''}`}>
-                        <p className={`text-[9px] font-black uppercase tracking-widest mb-0.5 ${isToday ? 'theme-primary' : 'text-slate-400'}`}>
-                          {date.toLocaleDateString('en-US', { weekday: 'short' })}
-                        </p>
-                        <p className={`text-lg font-black ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{date.getDate()}</p>
-                      </div>
-                    );
-                  })}
-               </div>
-               
-               {/* Body Grid */}
-               <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-                  {dynamicHours.map(hour => (
-                    <div key={hour} className="flex min-h-[90px] border-b border-slate-50 last:border-b-0">
-                       <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center">
-                          <span className="text-[10px] font-black text-slate-400">{hour.toString().padStart(2, '0')}:00</span>
-                       </div>
-                       {currentWeekDates.map((date, dayIdx) => {
-                          const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
-                          const hourClasses = dayClasses.filter(c => parseInt(c.classTime.split(':')[0]) === hour);
-                          
-                          // Convert date to string for lesson plan matching
-                          const dateStr = toLocalDateString(date);
-
-                          return (
-                            <div key={dayIdx} className="flex-1 p-1 flex flex-col gap-1 border-r border-slate-50 last:border-r-0 relative">
-                               {hourClasses.map(cls => {
-                                 // Find matching lesson plan for this class on this day
-                                 const activePlan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === dateStr);
-                                 
-                                 return (
-                                   <div 
-                                     key={cls.id} 
-                                     onClick={() => onClassClick(cls.id)}
-                                     className="p-2 rounded-xl text-white shadow-sm hover:brightness-95 transition-all cursor-pointer group h-full flex flex-col justify-center"
-                                     style={{ backgroundColor: cls.themeColor }}
-                                   >
-                                      <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
-                                      <p className="text-[9px] font-black leading-tight line-clamp-1">{cls.name}</p>
-                                      
-                                      {/* --- LESSON PLAN STATUS INDICATOR --- */}
-                                      {activePlan && (
-                                        <div className="mt-1.5 flex items-center gap-1.5 bg-black/20 rounded-lg px-2 py-1 backdrop-blur-sm w-fit max-w-full">
-                                           <span className="text-[8px] leading-none shrink-0">{getPlanStatusIcon(activePlan.status)}</span>
-                                           <span className="text-[8px] font-bold text-white/90 truncate">
-                                             {activePlan.text || activePlan.category} {/* Shows Outline if available */}
-                                           </span>
-                                        </div>
-                                      )}
-                                   </div>
-                                 );
-                               })}
-                               {hour === 9 && isHoliday && (
-                                  <div className="absolute inset-x-1 top-1 p-2 rounded-xl bg-red-50 border border-red-100 z-10 shadow-sm" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
-                                     <p className="text-[7px] font-black text-red-600 uppercase">Holiday</p>
-                                     <p className="text-[8px] font-bold text-red-800 truncate">{isHoliday.description}</p>
-                                  </div>
-                               )}
-                            </div>
-                          );
-                       })}
-                    </div>
-                  ))}
-               </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm h-full flex flex-col">
-              <div className="grid grid-cols-7 gap-4 mb-4">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-                  <div key={d} className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">{d}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-1 flex-1 overflow-y-auto custom-scrollbar">
-                {Array.from({ length: daysInMonth.adjustedFirstDay }).map((_, i) => <div key={`empty-${i}`} className="bg-slate-50/50 rounded-lg" />)}
-                {Array.from({ length: daysInMonth.lastDay }).map((_, i) => {
-                  const day = i + 1;
-                  const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-                  const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
-                  const isToday = date.toDateString() === today.toDateString();
-                  return (
-                    <div key={day} className={`p-1.5 rounded-lg border flex flex-col h-full min-h-[100px] transition-all overflow-hidden ${isToday ? 'theme-border theme-light-bg' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-                      <span className={`text-[10px] font-black mb-1 ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{day}</span>
-                      <div className="flex flex-col gap-0.5 overflow-hidden">
-                        {isHoliday && (
-                          <div 
-                            onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}
-                            className="bg-red-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black truncate cursor-pointer"
-                          >
-                            {isHoliday.description}
-                          </div>
-                        )}
-                        {dayClasses.map(c => (
-                          <div 
-                            key={c.id} 
-                            onClick={() => setSelectedEvent({ type: 'CLASS', ...c })} 
-                            className="text-white text-[7px] px-1.5 py-0.5 rounded-md font-black truncate cursor-pointer hover:brightness-90" 
-                            style={{ backgroundColor: c.themeColor }}
-                          >
-                            {c.name}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="xl:col-span-4 h-full overflow-hidden">
-          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm h-full flex flex-col">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="p-3 theme-light-bg rounded-2xl">
-                <CheckCircle2 className="w-6 h-6 theme-primary" />
-              </div>
-              <div>
-                <h3 className="text-xl font-black text-slate-800">Priority Stream</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Obligations</p>
-              </div>
-            </div>
-            
-            <div className="flex-1 space-y-2 overflow-y-auto custom-scrollbar pr-2">
-              {tasks.filter(t => t.status !== TaskStatus.COMPLETE).map(task => {
-                const isLessonTask = task.id.startsWith('lp-');
-                return (
-                  <div 
-                    key={task.id} 
-                    onClick={isLessonTask ? () => onClassClick(task.id.split('-')[1]) : onTaskClick}
-                    className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100 hover:theme-border hover:bg-white transition-all group cursor-pointer"
-                  >
-                    <div className={`text-[9px] font-black text-white px-2 py-0.5 rounded-lg shrink-0 uppercase w-10 text-center ${getStatusColor(task.status)}`}>
-                      {task.category.substring(0, 3)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-black text-slate-800 truncate">{task.name}</p>
-                    </div>
-                    <div className="text-[9px] font-black text-slate-400 whitespace-nowrap bg-white px-2 py-0.5 rounded-lg border border-slate-100">
-                      {task.dueDate}
-                    </div>
-                  </div>
-                );
-              })}
-              {tasks.filter(t => t.status !== TaskStatus.COMPLETE).length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-center py-20 opacity-20">
-                  <CheckCircle2 className="w-16 h-16 mb-4" />
-                  <p className="text-sm font-black uppercase tracking-widest">Clear List</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        {enrolledClasses.map(cls => (
+          <div key={cls.id} onClick={() => setSelectedClassId(cls.id)} className="bg-white rounded-[3rem] p-10 border border-slate-200 hover:theme-border hover:shadow-2xl hover:-translate-y-2 transition-all cursor-pointer group relative overflow-hidden">
+             <div className="w-2 h-20 absolute left-0 top-1/2 -translate-y-1/2 rounded-r-2xl" style={{ backgroundColor: cls.themeColor }} />
+             <h3 className="text-2xl font-black text-slate-800 mb-8 group-hover:theme-primary transition-colors">{cls.name}</h3>
+             <div className="space-y-5">
+                <div className="flex items-center gap-4 text-slate-500"><Calendar className="w-5 h-5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">Every {cls.classDay}</span></div>
+                <div className="flex items-center gap-4 text-slate-500"><Clock className="w-5 h-5 opacity-40" /><span className="text-[10px] font-black uppercase tracking-widest">{cls.classTime}</span></div>
+             </div>
+             <div className="mt-10 pt-10 border-t border-slate-100 flex justify-between items-center">
+                <div className="flex -space-x-3">
+                   {[1,2,3].map(i => <div key={i} className="w-8 h-8 rounded-full border-4 border-white bg-slate-100" />)}
+                   <div className="w-8 h-8 rounded-full border-4 border-white theme-bg flex items-center justify-center text-[8px] font-black text-white">+</div>
                 </div>
-              )}
-            </div>
+                <span className="text-[9px] font-black theme-primary uppercase tracking-widest">View Progress</span>
+             </div>
           </div>
-        </div>
+        ))}
+        {enrolledClasses.length === 0 && (
+          <div className="col-span-full py-40 text-center bg-white rounded-[4rem] border-4 border-dashed border-slate-100 flex flex-col items-center">
+            <GraduationCap className="w-16 h-16 text-slate-200 mb-6" />
+            <p className="text-lg font-black text-slate-800">No Enrolled Classes</p>
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">Contact administrator for registry</p>
+          </div>
+        )}
       </div>
-
-      {selectedEvent && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-           <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl relative animate-in zoom-in-95 duration-200">
-              <button onClick={() => setSelectedEvent(null)} className="absolute top-8 right-8 p-2 hover:bg-slate-100 rounded-full transition-all active:scale-90">
-                <X className="w-6 h-6 text-slate-400" />
-              </button>
-              
-              <div className="mb-6">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 ${
-                  selectedEvent.type === 'CLASS' ? 'theme-bg' : selectedEvent.type === 'HOLIDAY' ? 'bg-red-500' : 'bg-amber-400'
-                }`}>
-                  {selectedEvent.type === 'CLASS' ? <CalendarIcon className="w-6 h-6 text-white" /> : 
-                   selectedEvent.type === 'HOLIDAY' ? <AlertCircle className="w-6 h-6 text-white" /> :
-                   <ListChecks className="w-6 h-6 text-white" />}
-                </div>
-                <h3 className="text-2xl font-black text-slate-800 mb-2">{selectedEvent.name || selectedEvent.description}</h3>
-                <p className="text-[10px] font-black theme-primary uppercase tracking-[0.2em]">{selectedEvent.type} Details</p>
-              </div>
-
-              <div className="space-y-4 border-t border-slate-100 pt-6">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="font-bold text-slate-400 uppercase text-[10px]">Date/Time</span>
-                  <span className="font-black text-slate-700">
-                    {selectedEvent.date || `${selectedEvent.classDay} ${selectedEvent.classTime}` || selectedEvent.dueDate}
-                  </span>
-                </div>
-                {selectedEvent.category && (
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-slate-400 uppercase text-[10px]">Category</span>
-                    <span className="font-black theme-primary bg-primary-light px-2 py-0.5 rounded-lg border border-primary text-[10px] uppercase">
-                      {selectedEvent.category}
-                    </span>
-                  </div>
-                )}
-                {selectedEvent.status && (
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-slate-400 uppercase text-[10px]">Status</span>
-                    <span className={`font-black text-white px-3 py-1 rounded-full text-[10px] uppercase ${getStatusColor(selectedEvent.status)}`}>
-                      {selectedEvent.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                onClick={() => setSelectedEvent(null)}
-                className="w-full mt-10 py-4 theme-bg text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all"
-              >
-                Close Details
-              </button>
-           </div>
-        </div>
-      )}
     </div>
   );
 };
 
-export default TeacherDashboard;
+const StudentClassView: React.FC<{ 
+  cls: Class; 
+  student: User; 
+  attendance: AttendanceRecord[]; 
+  examResults: ExamResult[]; 
+  onBack: () => void; 
+}> = ({ cls, student, attendance, examResults, onBack }) => {
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const stats = useMemo(() => {
+    const monthAtt = attendance.filter(a => new Date(a.date).getMonth() === selectedMonth);
+    const presentCount = monthAtt.filter(a => a.status === AttendanceStatus.PRESENT).length;
+    const attPercent = monthAtt.length > 0 ? (presentCount / monthAtt.length) * 100 : 0;
+    const avgScore = examResults.length > 0 ? examResults.reduce((acc, curr) => acc + curr.score, 0) / examResults.length : 0;
+    const latestExam = examResults.length > 0 ? [...examResults].sort((a,b) => b.id.localeCompare(a.id))[0] : null;
+    return { attPercent, avgScore, latestExam };
+  }, [attendance, examResults, selectedMonth]);
+
+  const generateAIComment = async () => {
+    setIsGenerating(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY_HERE" }); // Ensure this is safe or from env
+      const notes = attendance.map(a => `${a.date}: ${a.performanceComment}`).filter(n => n.length > 10).join('\n');
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: `Act as a supportive academic mentor. Based on these teacher notes for student ${student.name} in class ${cls.name}, provide a supportive 2-sentence summary of their performance and one encouraging tip for next month. 
+        Teacher's Notes:
+        ${notes || "The student has been attending class regularly and participating well."}`,
+      });
+      setAiAnalysis(response.text);
+    } catch (e) {
+      setAiAnalysis("You are showing great consistency in your learning path. Focus on maintaining this momentum!");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-10 animate-in fade-in zoom-in-95 duration-500 pb-20">
+      <div className="flex items-center gap-6">
+        <button onClick={onBack} className="p-4 bg-white border border-slate-200 hover:bg-slate-50 rounded-3xl shadow-sm transition-all group active:scale-95"><ChevronLeft className="w-6 h-6 text-slate-600 group-hover:theme-primary" /></button>
+        <div><h1 className="text-4xl font-black text-slate-800">{cls.name} Analysis</h1><p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">Personal Progress Terminal</p></div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
+           <div className="flex justify-between items-start">
+              <div className="p-3 bg-emerald-50 rounded-2xl"><CheckCircle2 className="w-6 h-6 text-emerald-500" /></div>
+              <select className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-3 py-1.5 rounded-xl border-none outline-none" value={selectedMonth} onChange={e => setSelectedMonth(parseInt(e.target.value))}>
+                {Array.from({length: 12}).map((_, i) => <option key={i} value={i}>{new Date(0, i).toLocaleString('default', {month: 'long'})}</option>)}
+              </select>
+           </div>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monthly Attendance</p>
+           <h4 className="text-4xl font-black text-slate-800">{stats.attPercent.toFixed(1)}%</h4>
+           <div className="w-full h-2 bg-slate-50 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${stats.attPercent}%` }} /></div>
+        </div>
+
+        <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
+           <div className="p-3 theme-light-bg rounded-2xl w-fit"><TrendingUp className="w-6 h-6 theme-primary" /></div>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Average Exam Score</p>
+           <h4 className="text-4xl font-black text-slate-800">{stats.avgScore.toFixed(1)}%</h4>
+           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cumulative GPA across terms</p>
+        </div>
+
+        <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
+           <div className="p-3 bg-amber-50 rounded-2xl w-fit"><BarChart3 className="w-6 h-6 text-amber-500" /></div>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Latest Exam Outcome</p>
+           <h4 className="text-4xl font-black text-slate-800">{stats.latestExam?.score || 0}%</h4>
+           <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest truncate">{stats.latestExam?.examName || 'No Exams Logged'}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+        <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
+           <h3 className="text-2xl font-black text-slate-800 mb-10 flex items-center gap-4"><FileText className="w-8 h-8 theme-primary" /> Attendance & Metric Log</h3>
+           <div className="flex-1 overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-slate-50 z-10">
+                  <tr className="border-b border-slate-200">
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Metric</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {attendance.sort((a,b) => b.date.localeCompare(a.date)).map(record => (
+                    <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-6 font-black text-slate-800 text-xs">{record.date}</td>
+                      <td className="px-6 py-6 text-center">
+                        <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
+                          record.status === AttendanceStatus.PRESENT ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                          record.status === AttendanceStatus.ABSENT ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
+                        }`}>{record.status}</span>
+                      </td>
+                      <td className="px-6 py-6 text-xs text-slate-500 font-medium leading-relaxed italic">"{record.performanceComment || 'Steady progress maintained.'}"</td>
+                      <td className="px-6 py-6 text-right font-black text-slate-800 text-sm">{record.testScore ? `${record.testScore}%` : '--'}</td>
+                    </tr>
+                  ))}
+                  {attendance.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
+                        No activity records found for this registry.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+           </div>
+        </div>
+
+        <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px] relative overflow-hidden">
+           <div className="flex items-center gap-4 mb-10">
+              <div className="p-4 theme-light-bg rounded-3xl"><Sparkles className="w-8 h-8 theme-primary" /></div>
+              <div><h3 className="text-2xl font-black text-slate-800">Support Terminal</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Mentor Analysis</p></div>
+           </div>
+           
+           <div className="flex-1 bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 relative group overflow-y-auto custom-scrollbar">
+              {isGenerating ? (
+                <div className="h-full flex flex-col items-center justify-center space-y-4">
+                  <div className="w-12 h-12 theme-bg rounded-full animate-ping opacity-20" />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Synthesizing Data...</p>
+                </div>
+              ) : aiAnalysis ? (
+                <div className="space-y-6">
+                  <p className="text-base font-bold text-slate-700 leading-relaxed whitespace-pre-wrap">"{aiAnalysis}"</p>
+                  <div className="pt-6 border-t border-slate-200">
+                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Growth Tip</p>
+                     <p className="text-xs font-bold text-slate-500 mt-2">Active participation in classroom discussions often leads to better comprehension of complex topics.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-6 px-4">
+                   <AlertCircle className="w-12 h-12 text-slate-200" />
+                   <p className="text-sm font-bold text-slate-400 leading-relaxed uppercase tracking-widest">Request a synthesis of teacher insights and personalized growth strategies.</p>
+                   <button onClick={generateAIComment} className="theme-bg text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-500/10 active:scale-95 transition-all">Analyze Performance</button>
+                </div>
+              )}
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default StudentDashboard;
