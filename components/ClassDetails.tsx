@@ -10,7 +10,7 @@ import {
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
-// --- 1. COMPONENT: AutoSaveInput (Fixes Chinese Glitch) ---
+// --- COMPONENT: AutoSaveInput (Fixes Chinese Glitch) ---
 const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }: any) => {
   const [localValue, setLocalValue] = useState(value || '');
 
@@ -36,8 +36,12 @@ const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }:
   );
 };
 
-// --- 2. FIXED CONSTANTS: Ensures Attendance Buttons Always Work ---
-const ATTENDANCE_OPTIONS = ['PRESENT', 'ABSENT', 'LATE'];
+// --- FIXED CONSTANTS: Ensures Buttons Match Database Exactly ---
+const ATTENDANCE_OPTIONS = [
+  { value: 'PRESENT', label: 'P', color: 'bg-emerald-500', shadow: 'shadow-emerald-200' },
+  { value: 'ABSENT', label: 'A', color: 'bg-red-500', shadow: 'shadow-red-200' },
+  { value: 'LATE', label: 'Late', color: 'bg-yellow-400', shadow: 'shadow-yellow-200' }
+];
 
 interface ClassDetailsProps {
   cls: Class;
@@ -71,12 +75,11 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [examColumns, setExamColumns] = useState(['Mid-Term', 'Final Exam']);
   const [selectedGraphExam, setSelectedGraphExam] = useState(examColumns[0]);
 
-  // --- 3. LOGIC: Smart Test Day Detection ---
+  // --- LOGIC: Smart Test Day Detection ---
   const isTestDay = useMemo(() => {
     const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
     if (!plan) return false;
     const cat = (plan.category || '').toLowerCase();
-    // Keywords to trigger the Marks Column
     return cat.includes('test') || cat.includes('exam') || cat.includes('assessment') || cat.includes('quiz');
   }, [lessonPlans, cls.id, selectedDate]);
 
@@ -143,43 +146,50 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // --- 4. FIXED ATTENDANCE HANDLER ---
-  const handleAttendanceChange = async (studentId: string, status: string) => {
+  // --- FIXED ATTENDANCE LOGIC START ---
+  const handleAttendanceChange = async (studentId: string, statusValue: string) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    // UNDO Logic: If clicking the same status, remove it.
-    if (existing?.status === status) {
+    console.log("Updating Attendance:", { recordId, statusValue, existingStatus: existing?.status });
+
+    // UNDO: If clicking the same status, delete the record
+    if (existing?.status === statusValue) {
       try { 
         await deleteDoc(doc(db, 'attendance', recordId)); 
-      } catch (err) { console.error(err); }
+      } catch (err) { console.error("Error deleting attendance:", err); }
       return;
     }
 
+    // UPDATE: Set new status
     const record: AttendanceRecord = {
       id: recordId,
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status: status as AttendanceStatus,
+      status: statusValue as AttendanceStatus, // Force string to match type
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
       testScore: existing?.testScore
     };
-    await setDoc(doc(db, 'attendance', recordId), record);
-  };
-
-  // --- 5. FIXED BUTTON COLORS (Green/Red/Yellow) ---
-  const getAttendanceBtnColor = (status: string, isActive: boolean) => {
-    if (!isActive) return 'bg-slate-50 text-slate-400 hover:bg-slate-200 border border-slate-100';
     
-    switch(status) {
-      case 'PRESENT': return 'bg-emerald-500 text-white shadow-md shadow-emerald-200 border-transparent';
-      case 'ABSENT': return 'bg-red-500 text-white shadow-md shadow-red-200 border-transparent';
-      case 'LATE': return 'bg-yellow-400 text-white shadow-md shadow-yellow-200 border-transparent';
-      default: return 'bg-slate-400 text-white';
+    try {
+      await setDoc(doc(db, 'attendance', recordId), record);
+    } catch (err) {
+      console.error("Error saving attendance:", err);
+      alert("Failed to save attendance. Check console.");
     }
   };
+
+  // Helper to get button style
+  const getAttendanceBtnStyle = (opt: typeof ATTENDANCE_OPTIONS[0], currentStatus: string | undefined) => {
+    const isActive = currentStatus === opt.value;
+    if (isActive) {
+      return `${opt.color} text-white shadow-md ${opt.shadow} border-transparent scale-110`;
+    }
+    return 'bg-slate-50 text-slate-400 hover:bg-slate-200 border border-slate-100';
+  };
+  // --- FIXED ATTENDANCE LOGIC END ---
 
   const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: any) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
@@ -268,6 +278,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+        {/* LEFT COLUMN: ARCHIVE */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <div className="flex items-center justify-between mb-10">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -296,6 +307,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
+        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -347,15 +359,15 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                           <div className="flex flex-col items-center gap-2">
                             <div className="flex justify-center gap-2">
                               {/* 6. FIXED BUTTON RENDERING */}
-                              {ATTENDANCE_OPTIONS.map(status => (
+                              {ATTENDANCE_OPTIONS.map(opt => (
                                 <button 
-                                  key={status} 
-                                  onClick={() => handleAttendanceChange(student.id, status)} 
+                                  key={opt.value} 
+                                  onClick={() => handleAttendanceChange(student.id, opt.value)} 
                                   className={`w-10 h-10 rounded-xl text-[10px] font-black uppercase transition-all ${
-                                    getAttendanceBtnColor(status, record?.status === status)
+                                    getAttendanceBtnStyle(opt, record?.status)
                                   }`}
                                 >
-                                  {status.charAt(0)}
+                                  {opt.label}
                                 </button>
                               ))}
                             </div>
