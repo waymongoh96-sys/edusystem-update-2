@@ -14,13 +14,11 @@ import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }: any) => {
   const [localValue, setLocalValue] = useState(value || '');
 
-  // Sync with prop only if it changes externally (and isn't the one we just saved)
   useEffect(() => {
     setLocalValue(value || '');
   }, [value]);
 
   const handleBlur = () => {
-    // Only save if value is different to prevent loops
     if (localValue !== value) {
       onSave(localValue);
     }
@@ -76,7 +74,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
     if (!plan) return false;
     const cat = plan.category.toLowerCase();
-    // Returns true if category matches any of these keywords
     return cat.includes('test') || cat.includes('exam') || cat.includes('assessment') || cat.includes('quiz');
   }, [lessonPlans, cls.id, selectedDate]);
 
@@ -143,15 +140,20 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
+  // --- ATTENDANCE FIX START ---
   const handleAttendanceChange = async (studentId: string, status: AttendanceStatus) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
+    // UNDO LOGIC: If clicking the same status, delete the record (toggle off)
     if (existing?.status === status) {
-      try { await deleteDoc(doc(db, 'attendance', recordId)); } catch (err) { console.error(err); }
+      try { 
+        await deleteDoc(doc(db, 'attendance', recordId)); 
+      } catch (err) { console.error(err); }
       return;
     }
 
+    // UPDATE LOGIC: Set new status
     const record: AttendanceRecord = {
       id: recordId,
       classId: cls.id,
@@ -160,10 +162,23 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       status,
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
-      testScore: existing?.testScore // Keep existing score if any
+      testScore: existing?.testScore
     };
     await setDoc(doc(db, 'attendance', recordId), record);
   };
+
+  // COLOR LOGIC FIX: Check if isActive is strictly true
+  const getAttendanceBtnColor = (status: AttendanceStatus, isActive: boolean) => {
+    if (!isActive) return 'bg-slate-50 text-slate-400 hover:bg-slate-200 border border-slate-100';
+    
+    switch(status) {
+      case AttendanceStatus.PRESENT: return 'bg-emerald-500 text-white shadow-md shadow-emerald-200 border-transparent';
+      case AttendanceStatus.ABSENT: return 'bg-red-500 text-white shadow-md shadow-red-200 border-transparent';
+      case AttendanceStatus.LATE: return 'bg-amber-400 text-white shadow-md shadow-amber-200 border-transparent';
+      default: return 'bg-slate-400 text-white shadow-md';
+    }
+  };
+  // --- ATTENDANCE FIX END ---
 
   const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: any) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
@@ -174,23 +189,13 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status: existing?.status || AttendanceStatus.PRESENT, // Default to Present if just marking info
+      status: existing?.status || AttendanceStatus.PRESENT,
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
       testScore: existing?.testScore,
       [field]: value
     };
     await setDoc(doc(db, 'attendance', recordId), record);
-  };
-
-  const getAttendanceBtnColor = (status: AttendanceStatus, isActive: boolean) => {
-    if (!isActive) return 'bg-slate-50 text-slate-400 hover:bg-slate-200';
-    switch(status) {
-      case AttendanceStatus.PRESENT: return 'bg-emerald-500 text-white shadow-md';
-      case AttendanceStatus.ABSENT: return 'bg-red-500 text-white shadow-md';
-      case AttendanceStatus.LATE: return 'bg-amber-400 text-white shadow-md';
-      default: return 'bg-slate-400 text-white shadow-md';
-    }
   };
 
   const updateExamScore = async (studentId: string, examName: string, score: string) => {
@@ -204,7 +209,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     const currentList = cls.enrolledStudentIds || [];
     if (!currentList.includes(studentId)) {
       const newList = [...currentList, studentId];
-      // Update both legacy and new fields
       const updatedClass = { ...cls, enrolledStudentIds: newList, studentIds: newList };
       updateClass(updatedClass);
     }
@@ -263,7 +267,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
-        {/* LEFT COLUMN: ARCHIVE */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <div className="flex items-center justify-between mb-10">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -292,7 +295,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
-        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -320,7 +322,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100">Student</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
-                    {/* CONDITIONAL COLUMN: Only show Marks if it is a Test Day */}
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right">
                       {isTestDay ? 'Marks (%)' : 'Metric'}
                     </th>
@@ -344,11 +345,23 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                           <div className="flex flex-col items-center gap-2">
                             <div className="flex justify-center gap-2">
                               {Object.values(AttendanceStatus).map(status => (
-                                <button key={status} onClick={() => handleAttendanceChange(student.id, status as AttendanceStatus)} className={`w-10 h-10 rounded-xl text-[10px] font-black uppercase transition-all ${getAttendanceBtnColor(status as AttendanceStatus, record?.status === status)}`}>{status.charAt(0)}</button>
+                                <button 
+                                  key={status} 
+                                  onClick={() => handleAttendanceChange(student.id, status as AttendanceStatus)} 
+                                  className={`w-10 h-10 rounded-xl text-[10px] font-black uppercase transition-all ${
+                                    getAttendanceBtnColor(status as AttendanceStatus, record?.status === status)
+                                  }`}
+                                >
+                                  {status.charAt(0)}
+                                </button>
                               ))}
                             </div>
                             {record?.status === AttendanceStatus.ABSENT && (
-                              <select className="w-full mt-1 p-2 bg-red-50 border border-red-100 rounded-lg text-[9px] font-black text-red-700 outline-none" value={record.reason || ''} onChange={(e) => updateAttendanceField(student.id, 'reason', e.target.value)}>
+                              <select 
+                                className="w-full mt-1 p-2 bg-red-50 border border-red-100 rounded-lg text-[9px] font-black text-red-700 outline-none"
+                                value={record.reason || ''}
+                                onChange={(e) => updateAttendanceField(student.id, 'reason', e.target.value)}
+                              >
                                 <option value="">Select Reason...</option>
                                 {settings.absentReasons.map(r => <option key={r} value={r}>{r}</option>)}
                               </select>
@@ -356,7 +369,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                           </div>
                         </td>
                         <td className="px-6 py-6">
-                          {/* USE AutoSaveInput TO FIX CHINESE GLITCH */}
                           <AutoSaveInput 
                             className="w-full text-xs font-bold p-4 bg-slate-50 border border-slate-100 rounded-[1.5rem] outline-none focus:bg-white focus:theme-border transition-all"
                             placeholder="Observational feedback..."
@@ -390,7 +402,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
         </div>
       </div>
 
-      {/* EXAM CORE SECTION */}
       <div className="bg-white rounded-[4rem] p-16 border border-slate-200 shadow-sm space-y-16">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
            <div className="flex items-center gap-6">
