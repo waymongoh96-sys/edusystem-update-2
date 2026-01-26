@@ -109,7 +109,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
     });
     if (count > 0) {
       await batch.commit();
-      alert(`Restored ${count} students.`);
+      alert(`Added ${count} students.`);
     }
     setIsBulkImporting(false);
     setBulkData('');
@@ -159,7 +159,7 @@ const AdminView: React.FC<AdminViewProps> = ({ teachers, students, classes }) =>
           <button onClick={() => setActiveTab('STUDENT')} className={`px-6 py-2.5 rounded-xl font-bold ${activeTab === 'STUDENT' ? 'bg-white shadow text-purple-700' : 'text-slate-500'}`}>Students</button>
         </div>
         <div className="flex gap-2">
-          {activeTab === 'STUDENT' && <button onClick={() => setIsBulkImporting(true)} className="bg-white border px-4 py-2.5 rounded-xl flex items-center gap-2 text-slate-700 hover:bg-slate-50"><Upload className="w-4 h-4" /> Restore</button>}
+          {activeTab === 'STUDENT' && <button onClick={() => setIsBulkImporting(true)} className="bg-white border px-4 py-2.5 rounded-xl flex items-center gap-2 text-slate-700 hover:bg-slate-50"><Upload className="w-4 h-4" /> Bulk Add</button>}
           {activeTab !== 'CLASSES' && <button onClick={() => { setEditingUserId(null); setIsAdding(true); }} className="bg-purple-600 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 hover:bg-purple-700"><Plus className="w-5 h-5" /> New</button>}
         </div>
       </div>
