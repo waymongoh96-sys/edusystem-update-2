@@ -36,11 +36,11 @@ const AutoSaveInput = ({ value, onSave, placeholder, type = "text", className }:
   );
 };
 
-// --- FIXED CONSTANTS: Ensures Buttons Match Database Exactly ---
+// --- CONSTANTS ---
 const ATTENDANCE_OPTIONS = [
   { value: 'PRESENT', label: 'P', color: 'bg-emerald-500', shadow: 'shadow-emerald-200' },
   { value: 'ABSENT', label: 'A', color: 'bg-red-500', shadow: 'shadow-red-200' },
-  { value: 'LATE', label: 'Late', color: 'bg-yellow-400', shadow: 'shadow-yellow-200' }
+  { value: 'LATE', label: 'L', color: 'bg-yellow-400', shadow: 'shadow-yellow-200' }
 ];
 
 interface ClassDetailsProps {
@@ -75,7 +75,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [examColumns, setExamColumns] = useState(['Mid-Term', 'Final Exam']);
   const [selectedGraphExam, setSelectedGraphExam] = useState(examColumns[0]);
 
-  // --- LOGIC: Smart Test Day Detection ---
+  // --- LOGIC: Test Day Detection ---
   const isTestDay = useMemo(() => {
     const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
     if (!plan) return false;
@@ -146,42 +146,40 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // --- FIXED ATTENDANCE LOGIC START ---
+  // --- SAFE ATTENDANCE HANDLER (Fixes 'Failed to Save') ---
   const handleAttendanceChange = async (studentId: string, statusValue: string) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    console.log("Updating Attendance:", { recordId, statusValue, existingStatus: existing?.status });
-
-    // UNDO: If clicking the same status, delete the record
+    // Undo Logic (Delete if same status clicked)
     if (existing?.status === statusValue) {
       try { 
         await deleteDoc(doc(db, 'attendance', recordId)); 
-      } catch (err) { console.error("Error deleting attendance:", err); }
+      } catch (err) { console.error("Error deleting:", err); }
       return;
     }
 
-    // UPDATE: Set new status
-    const record: AttendanceRecord = {
+    // Save Logic (Safe Data)
+    const record = {
       id: recordId,
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status: statusValue as AttendanceStatus, // Force string to match type
+      status: statusValue as AttendanceStatus,
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
-      testScore: existing?.testScore
+      testScore: existing?.testScore || null // Use NULL instead of undefined to prevent crashes
     };
     
     try {
       await setDoc(doc(db, 'attendance', recordId), record);
     } catch (err) {
-      console.error("Error saving attendance:", err);
-      alert("Failed to save attendance. Check console.");
+      console.error("Detailed Error:", err);
+      alert("Failed to save attendance. See console for details.");
     }
   };
 
-  // Helper to get button style
+  // --- BUTTON COLOR LOGIC (Green/Red/Yellow) ---
   const getAttendanceBtnStyle = (opt: typeof ATTENDANCE_OPTIONS[0], currentStatus: string | undefined) => {
     const isActive = currentStatus === opt.value;
     if (isActive) {
@@ -189,24 +187,26 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
     return 'bg-slate-50 text-slate-400 hover:bg-slate-200 border border-slate-100';
   };
-  // --- FIXED ATTENDANCE LOGIC END ---
 
   const updateAttendanceField = async (studentId: string, field: keyof AttendanceRecord, value: any) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    const record: AttendanceRecord = {
+    const record = {
       id: recordId,
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status: existing?.status || AttendanceStatus.PRESENT,
+      status: existing?.status || 'PRESENT', // Default to present if editing fields without status
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
-      testScore: existing?.testScore,
+      testScore: existing?.testScore || null,
       [field]: value
     };
-    await setDoc(doc(db, 'attendance', recordId), record);
+    
+    try {
+      await setDoc(doc(db, 'attendance', recordId), record);
+    } catch (e) { console.error(e); }
   };
 
   const updateExamScore = async (studentId: string, examName: string, score: string) => {
@@ -278,7 +278,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
-        {/* LEFT COLUMN: ARCHIVE */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <div className="flex items-center justify-between mb-10">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -307,7 +306,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
-        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -335,7 +333,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-50 z-40 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Student</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
-                    {/* CONDITIONAL COLUMN: Marks vs Metric */}
                     <th className="px-6 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right">
                       {isTestDay ? 'Marks (%)' : 'Metric'}
                     </th>
@@ -358,7 +355,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                         <td className="px-6 py-6">
                           <div className="flex flex-col items-center gap-2">
                             <div className="flex justify-center gap-2">
-                              {/* 6. FIXED BUTTON RENDERING */}
                               {ATTENDANCE_OPTIONS.map(opt => (
                                 <button 
                                   key={opt.value} 
@@ -384,7 +380,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                           </div>
                         </td>
                         <td className="px-6 py-6">
-                          {/* Chinese Input Fix */}
                           <AutoSaveInput 
                             className="w-full text-xs font-bold p-4 bg-slate-50 border border-slate-100 rounded-[1.5rem] outline-none focus:bg-white focus:theme-border transition-all"
                             placeholder="Observational feedback..."
@@ -415,99 +410,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                 </tbody>
               </table>
            </div>
-        </div>
-      </div>
-
-      {/* EXAM CORE SECTION */}
-      <div className="bg-white rounded-[4rem] p-16 border border-slate-200 shadow-sm space-y-16">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-           <div className="flex items-center gap-6">
-             <div className="p-5 theme-light-bg rounded-[2.5rem]"><BarChart3 className="w-10 h-10 theme-primary" /></div>
-             <div><h3 className="text-3xl font-black text-slate-800">Exam Core</h3><p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mt-2">Analytical Performance Matrix</p></div>
-           </div>
-           <div className="flex gap-4">
-              <button onClick={() => setIsEditingExams(!isEditingExams)} className={`px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${isEditingExams ? 'theme-bg text-white shadow-xl' : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-200'}`}><Edit className="w-4 h-4 mr-2 inline" /> {isEditingExams ? 'Finalize Core' : 'Modify Registry'}</button>
-              {isEditingExams && (
-                <button onClick={() => { const n = `Exam ${examColumns.length + 1}`; setExamColumns([...examColumns, n]); setSelectedGraphExam(n); }} className="p-4 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-2xl hover:bg-emerald-100 transition-all"><Plus className="w-6 h-6" /></button>
-              )}
-           </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-20">
-          <div className="overflow-x-auto custom-scrollbar">
-             <table className="w-full text-left border-collapse">
-               <thead>
-                 <tr className="border-b-2 border-slate-100">
-                    <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Student</th>
-                    {examColumns.map((col, idx) => (
-                      <th key={idx} className="pb-6 px-4 text-center">
-                        {isEditingExams ? (
-                          <div className="flex items-center gap-2">
-                             <input className="w-24 text-[10px] font-black text-slate-800 border-b-2 border-slate-200 outline-none focus:theme-border pb-1" value={col} onChange={e => {
-                               const updated = [...examColumns];
-                               updated[idx] = e.target.value;
-                               if (selectedGraphExam === col) setSelectedGraphExam(e.target.value);
-                               setExamColumns(updated);
-                             }} />
-                             <button onClick={() => setExamColumns(examColumns.filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-600"><X className="w-3 h-3" /></button>
-                          </div>
-                        ) : (<span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{col}</span>)}
-                      </th>
-                    ))}
-                    <th className="pb-6 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">IMP%</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-50">
-                  {enrolledStudents.map(student => {
-                    const res = analyticsData.data.find(d => d.id === student.id);
-                    return (
-                      <tr key={student.id} className="group hover:bg-slate-50 transition-colors">
-                        <td className="py-5 font-black text-slate-800 text-xs">{student.name}</td>
-                        {examColumns.map((col, idx) => (
-                          <td key={idx} className="py-5 px-4 text-center">
-                            <input type="number" className="w-16 bg-transparent text-center font-black text-slate-700 outline-none theme-primary hover:bg-white p-1 rounded-lg transition-all" value={examResults.find(r => r.classId === cls.id && r.studentId === student.id && r.examName === col)?.score || ''} onChange={e => updateExamScore(student.id, col, e.target.value)} />
-                          </td>
-                        ))}
-                        <td className="py-5 text-right font-black"><div className={`flex items-center justify-end gap-2 text-xs ${res?.improvement && res.improvement > 0 ? 'text-emerald-500' : 'text-slate-400'}`}>{res?.improvement ? `${res.improvement.toFixed(1)}%` : '0%'} {res?.improvement && res.improvement > 0 && <TrendingUp className="w-3 h-3" />}</div></td>
-                      </tr>
-                    );
-                  })}
-               </tbody>
-             </table>
-          </div>
-
-          <div className="bg-slate-50 rounded-[3rem] p-10 border border-slate-100 flex flex-col relative overflow-hidden">
-             <div className="flex items-center justify-between mb-10">
-                <div className="space-y-1">
-                  <h4 className="text-xl font-black text-slate-800">Performance Map</h4>
-                  <select 
-                    className="text-[9px] font-black theme-primary uppercase tracking-widest bg-transparent border-none outline-none cursor-pointer"
-                    value={selectedGraphExam}
-                    onChange={e => setSelectedGraphExam(e.target.value)}
-                  >
-                    {examColumns.map(col => <option key={col} value={col}>{col} Analysis</option>)}
-                  </select>
-                </div>
-                <div className="px-4 py-2 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                   <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Global Mean</p>
-                   <p className="text-sm font-black theme-primary">{analyticsData.average.toFixed(1)}%</p>
-                </div>
-             </div>
-             
-             <div className="flex-1 space-y-6 flex flex-col justify-start">
-                {analyticsData.data.map(student => (
-                  <div key={student.id} className="group flex items-center gap-6">
-                    <span className="w-24 text-[10px] font-black text-slate-400 uppercase truncate text-right shrink-0">{student.name}</span>
-                    <div className="flex-1 h-8 bg-white rounded-xl border border-slate-100 relative shadow-sm">
-                       <div className="h-full theme-bg transition-all duration-1000 rounded-r-lg overflow-hidden" style={{ width: `${student.current}%`, backgroundColor: cls.themeColor }} />
-                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-700">{student.current}%</span>
-                       <div className="absolute top-0 bottom-0 border-r-2 border-dotted border-black z-20 pointer-events-none transition-all duration-500" style={{ left: `${analyticsData.average}%` }} />
-                    </div>
-                  </div>
-                ))}
-             </div>
-             <div className="mt-10 flex justify-between px-2 pl-[120px] text-[8px] font-black text-slate-300 uppercase tracking-[0.5em]"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
-          </div>
         </div>
       </div>
 
