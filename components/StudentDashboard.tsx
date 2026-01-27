@@ -11,7 +11,7 @@ interface StudentDashboardProps {
   classes: Class[];
   attendance: AttendanceRecord[];
   examResults: ExamResult[];
-  lessonPlans: LessonPlan[]; // ADDED THIS PROP
+  lessonPlans: LessonPlan[];
 }
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ 
@@ -19,9 +19,12 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
 }) => {
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
 
+  // FIX: Updated logic to check BOTH new and legacy fields
   const enrolledClasses = useMemo(() => {
     return classes.filter(c => {
+      // 1. Get the list (handle new field, old field, or empty)
       const ids = c.enrolledStudentIds || (c as any).studentIds || [];
+      // 2. Safely check if student is included
       return Array.isArray(ids) && ids.includes(student.id);
     });
   }, [classes, student.id]);
@@ -88,7 +91,7 @@ const StudentClassView: React.FC<{
   student: User; 
   attendance: AttendanceRecord[]; 
   examResults: ExamResult[]; 
-  lessonPlans: LessonPlan[]; // ADDED
+  lessonPlans: LessonPlan[]; 
   onBack: () => void; 
 }> = ({ cls, student, attendance, examResults, lessonPlans, onBack }) => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -96,11 +99,16 @@ const StudentClassView: React.FC<{
   const [isGenerating, setIsGenerating] = useState(false);
 
   const stats = useMemo(() => {
+    // 1. Filter by selected month
     const monthAtt = attendance.filter(a => new Date(a.date).getMonth() === selectedMonth);
-    const presentCount = monthAtt.filter(a => a.status === AttendanceStatus.PRESENT).length;
+    
+    // 2. Count Present (Using String Comparison to fix mismatch)
+    // We check for 'PRESENT' (Database string) OR AttendanceStatus.PRESENT (Enum) to be safe
+    const presentCount = monthAtt.filter(a => String(a.status) === 'PRESENT' || a.status === AttendanceStatus.PRESENT).length;
+    
     const attPercent = monthAtt.length > 0 ? (presentCount / monthAtt.length) * 100 : 0;
     
-    // CHANGED: Calculate average using Daily Metrics (testScore) instead of Exam Results
+    // 3. Calculate Average Test Score
     const scoredAttendance = attendance.filter(a => a.testScore !== undefined && a.testScore !== null);
     const avgTestScore = scoredAttendance.length > 0 
       ? scoredAttendance.reduce((acc, curr) => acc + (curr.testScore || 0), 0) / scoredAttendance.length 
@@ -173,7 +181,6 @@ const StudentClassView: React.FC<{
                   <tr className="border-b border-slate-200">
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
-                    {/* ADDED COLUMN */}
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Lesson Outline</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Metric</th>
@@ -183,18 +190,19 @@ const StudentClassView: React.FC<{
                   {attendance.sort((a,b) => b.date.localeCompare(a.date)).map(record => {
                     // FIND LESSON PLAN FOR DATE
                     const plan = lessonPlans.find(p => p.classId === cls.id && p.date === record.date);
-                    
+                    const statusStr = String(record.status); // Convert to string safely
+
                     return (
                       <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-6 py-6 font-black text-slate-800 text-xs">{record.date}</td>
                         <td className="px-6 py-6 text-center">
                           <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
-                            record.status === AttendanceStatus.PRESENT ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                            record.status === AttendanceStatus.ABSENT ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
-                          }`}>{record.status}</span>
+                            statusStr === 'PRESENT' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                            statusStr === 'ABSENT' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
+                          }`}>{statusStr}</span>
                         </td>
-                        {/* LESSON OUTLINE CELL */}
-                        <td className="px-6 py-6 text-xs text-slate-600 font-bold max-w-[200px] truncate">
+                        {/* LESSON OUTLINE CELL (TEXT WRAPPING ENABLED) */}
+                        <td className="px-6 py-6 text-xs text-slate-600 font-bold whitespace-normal break-words max-w-[300px]">
                           {plan ? (plan.text || plan.category) : '-'}
                         </td>
                         <td className="px-6 py-6 text-xs text-slate-500 font-medium leading-relaxed italic max-w-[250px]">"{record.performanceComment || 'Steady progress maintained.'}"</td>
