@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   ChevronLeft, Plus, Edit, FileText, CheckCircle2, Clock, Trash2, 
-  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator
+  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator, Map, ArrowRight
 } from 'lucide-react';
 import { 
   Class, User, LessonPlan, AttendanceRecord, SystemSettings, 
@@ -66,6 +66,12 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [showEnrolModal, setShowEnrolModal] = useState(false);
   const [showPlanningModal, setShowPlanningModal] = useState(false);
+  
+  // --- NEW: Roadmap State ---
+  const [showRoadmapModal, setShowRoadmapModal] = useState(false);
+  const [roadmapExamDate, setRoadmapExamDate] = useState('');
+  const [roadmapTopics, setRoadmapTopics] = useState('');
+
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStandard, setFilterStandard] = useState('');
@@ -74,6 +80,98 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   
   const [examColumns, setExamColumns] = useState(['Mid-Term', 'Final Exam']);
   const [selectedGraphExam, setSelectedGraphExam] = useState(examColumns[0]);
+
+  // --- LOGIC: Pacing Bar ---
+  const pacingStats = useMemo(() => {
+    const roadmap = (cls as any).syllabusRoadmap || {};
+    const totalTopics = Object.keys(roadmap).length;
+    if (totalTopics === 0) return null;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    // Target: How many syllabus items dates are <= today
+    const targetCount = Object.keys(roadmap).filter(date => date <= todayStr).length;
+    // Actual: How many real lessons marked COMPLETE
+    const actualCount = lessonPlans.filter(lp => lp.classId === cls.id && lp.status === TaskStatus.COMPLETE).length;
+
+    const diff = actualCount - targetCount;
+    let statusColor = 'bg-emerald-500';
+    if (diff < 0) statusColor = 'bg-amber-500';
+    if (diff < -2) statusColor = 'bg-red-500';
+
+    return { total: totalTopics, target: targetCount, actual: actualCount, color: statusColor, diff };
+  }, [cls, lessonPlans]);
+
+  // --- LOGIC: Roadmap Generation (Dates) ---
+  const calculateRoadmapDates = () => {
+    if (!roadmapExamDate || !roadmapTopics.trim()) return null;
+    
+    const topics = roadmapTopics.split('\n').filter(t => t.trim() !== '');
+    const map: Record<string, string> = {};
+    
+    const examDateObj = new Date(roadmapExamDate);
+    let curr = new Date();
+    let index = 0;
+    
+    const daysMap: Record<string, number> = { 'Sunday':0, 'Monday':1, 'Tuesday':2, 'Wednesday':3, 'Thursday':4, 'Friday':5, 'Saturday':6 };
+    const targetDay = daysMap[cls.classDay] ?? 1;
+
+    while (index < topics.length && curr < examDateObj) {
+        curr.setDate(curr.getDate() + 1);
+        if (curr.getDay() === targetDay) {
+            const dStr = curr.toISOString().split('T')[0];
+            const isHoliday = settings.holidays.some(h => h.date === dStr);
+            if (!isHoliday) {
+                map[dStr] = topics[index];
+                index++;
+            }
+        }
+    }
+    return map;
+  };
+
+  const handleSaveRoadmap = (generateReal: boolean) => {
+    const map = calculateRoadmapDates();
+    if (!map) return alert("Invalid Input");
+
+    // 1. Save Shadow Plan
+    updateClass({ ...cls, syllabusRoadmap: map });
+
+    // 2. Generate Real Lessons (Optional)
+    if (generateReal) {
+        let count = 0;
+        Object.entries(map).forEach(async ([date, topic]) => {
+            // Check if lesson already exists
+            const exists = lessonPlans.some(lp => lp.classId === cls.id && lp.date === date);
+            if (!exists) {
+                const id = `${Date.now()}-${count}`;
+                const newPlan: LessonPlan = {
+                    id, classId: cls.id, date, 
+                    category: 'Lecture', 
+                    text: topic, 
+                    status: TaskStatus.HAVENT_START, 
+                    materials: []
+                };
+                await setDoc(doc(db, 'lessonPlans', id), newPlan);
+                count++;
+            }
+        });
+        alert(`Generated ${count} new lesson plans!`);
+    } else {
+        alert("Roadmap saved as draft.");
+    }
+    setShowRoadmapModal(false);
+  };
+
+  // --- LOGIC: Merged Archive Data ---
+  const archiveData = useMemo(() => {
+    const roadmap = (cls as any).syllabusRoadmap || {};
+    const dates = new Set([...lessonPlans.filter(lp => lp.classId === cls.id).map(lp => lp.date), ...Object.keys(roadmap)]);
+    return Array.from(dates).sort().reverse().map(date => {
+        const real = lessonPlans.find(lp => lp.classId === cls.id && lp.date === date);
+        const suggested = roadmap[date];
+        return { date, real, suggested };
+    });
+  }, [lessonPlans, cls]);
 
   // --- LOGIC: Test Day Detection ---
   const isTestDay = useMemo(() => {
@@ -95,17 +193,8 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     return Array.from(new Set(stds)).sort();
   }, [students]);
 
-  const filteredLessonPlans = useMemo(() => 
-    lessonPlans.filter(lp => lp.classId === cls.id).sort((a,b) => b.date.localeCompare(a.date)),
-    [lessonPlans, cls.id]
-  );
-
   const calculateDefaultDate = () => {
-    if (filteredLessonPlans.length > 0) {
-      const lastDate = new Date(filteredLessonPlans[0].date);
-      lastDate.setDate(lastDate.getDate() + 7);
-      return lastDate.toISOString().split('T')[0];
-    }
+    // ... (Keep existing logic)
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const targetDay = days.indexOf(cls.classDay);
     const now = new Date();
@@ -118,6 +207,12 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   const [lpFormData, setLpFormData] = useState<Partial<LessonPlan>>({
     date: '', text: '', category: settings.lessonCategories[0], status: TaskStatus.HAVENT_START, materials: []
   });
+
+  // --- LOGIC: Smart Suggestion ---
+  const suggestedTopic = useMemo(() => {
+    const roadmap = (cls as any).syllabusRoadmap || {};
+    return roadmap[lpFormData.date || ''];
+  }, [cls, lpFormData.date]);
 
   const openNewPlanning = () => {
     const defaultDate = calculateDefaultDate();
@@ -138,6 +233,16 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
+  const handleQuickAddFromSuggestion = async (date: string, topic: string) => {
+      const planId = Date.now().toString();
+      const planData: LessonPlan = { 
+          id: planId, classId: cls.id, date, 
+          category: 'Lecture', text: topic, 
+          status: TaskStatus.HAVENT_START, materials: [] 
+      };
+      await setDoc(doc(db, 'lessonPlans', planId), planData);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -146,12 +251,10 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // --- SAFE ATTENDANCE HANDLER (Fixes 'Failed to Save') ---
   const handleAttendanceChange = async (studentId: string, statusValue: string) => {
     const recordId = `${cls.id}-${studentId}-${selectedDate}`;
     const existing = attendance.find(a => a.id === recordId);
     
-    // Undo Logic (Delete if same status clicked)
     if (existing?.status === statusValue) {
       try { 
         await deleteDoc(doc(db, 'attendance', recordId)); 
@@ -159,7 +262,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       return;
     }
 
-    // Save Logic (Safe Data)
     const record = {
       id: recordId,
       classId: cls.id,
@@ -168,7 +270,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       status: statusValue as AttendanceStatus,
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
-      testScore: existing?.testScore || null // Use NULL instead of undefined to prevent crashes
+      testScore: existing?.testScore || null
     };
     
     try {
@@ -179,7 +281,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // --- BUTTON COLOR LOGIC (Green/Red/Yellow) ---
   const getAttendanceBtnStyle = (opt: typeof ATTENDANCE_OPTIONS[0], currentStatus: string | undefined) => {
     const isActive = currentStatus === opt.value;
     if (isActive) {
@@ -197,7 +298,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       classId: cls.id,
       studentId,
       date: selectedDate,
-      status: existing?.status || 'PRESENT', // Default to present if editing fields without status
+      status: existing?.status || 'PRESENT',
       performanceComment: existing?.performanceComment || '',
       reason: existing?.reason || '',
       testScore: existing?.testScore || null,
@@ -268,44 +369,94 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
               {cls.name}
               <span className="text-xl text-slate-300 font-bold ml-2">({enrolledStudents.length})</span>
             </h1>
-            <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">{cls.classDay}s at {cls.classTime}</p>
+            <div className="flex items-center gap-4 mt-2">
+               <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">{cls.classDay}s at {cls.classTime}</p>
+               
+               {/* --- PACING WIDGET --- */}
+               {pacingStats && (
+                 <div className="flex items-center gap-3 bg-white px-3 py-1 rounded-xl border border-slate-100 shadow-sm">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syllabus Pacing</span>
+                    <div className="w-24 h-2 bg-slate-100 rounded-full relative overflow-hidden">
+                       <div className="absolute top-0 bottom-0 bg-slate-300 opacity-30" style={{ width: `${(pacingStats.target / pacingStats.total) * 100}%` }} />
+                       <div className={`absolute top-0 bottom-0 ${pacingStats.color} transition-all duration-1000`} style={{ width: `${(pacingStats.actual / pacingStats.total) * 100}%` }} />
+                    </div>
+                    <span className={`text-[9px] font-black ${pacingStats.diff < 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                       {pacingStats.diff > 0 ? `+${pacingStats.diff}` : pacingStats.diff} Topics
+                    </span>
+                 </div>
+               )}
+            </div>
           </div>
         </div>
         <div className="flex gap-4">
+          {/* --- ROADMAP BUTTON --- */}
+          <button onClick={() => setShowRoadmapModal(true)} className="bg-white border border-slate-200 text-slate-500 px-6 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-sm hover:bg-slate-50 transition-all active:scale-95 flex items-center gap-2">
+             <Map className="w-4 h-4" /> Syllabus Plan
+          </button>
+          
           <button onClick={() => setShowEnrolModal(true)} className="bg-white border border-slate-200 theme-primary px-8 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-sm hover:bg-slate-50 transition-all active:scale-95">Registry Hub</button>
           <button onClick={openNewPlanning} className="theme-bg text-white px-10 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/10 hover:scale-105 transition-all active:scale-95 flex items-center gap-3"><Plus className="w-5 h-5" /> Schedule Lesson</button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+        {/* --- REPLACED ARCHIVE LIST WITH MERGED TABLE --- */}
         <div className="xl:col-span-4 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
-           <div className="flex items-center justify-between mb-10">
+           <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
                 <FileText className="w-8 h-8 theme-primary" /> Archive
               </h3>
-              <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-4 py-1.5 rounded-full border border-slate-100 uppercase tracking-widest">{filteredLessonPlans.length} Logs</span>
+              <span className="text-[10px] font-black text-slate-400 bg-slate-50 px-4 py-1.5 rounded-full border border-slate-100 uppercase tracking-widest">{archiveData.length} Slots</span>
            </div>
-           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4">
-              {filteredLessonPlans.map(lp => (
-                <div key={lp.id} className="p-6 bg-white rounded-[2rem] border border-slate-100 flex items-center justify-between hover:theme-border transition-all group shadow-sm">
-                  <div className="flex items-center gap-6">
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${lp.status === TaskStatus.COMPLETE ? 'bg-emerald-50 text-emerald-500' : 'bg-amber-50 text-amber-500'}`}>
-                      {lp.status === TaskStatus.COMPLETE ? <CheckCircle2 className="w-7 h-7" /> : <Clock className="w-7 h-7" />}
-                    </div>
-                    <div>
-                      <p className="text-lg font-black text-slate-800">{lp.date.split('-').reverse().join('/')}</p>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{lp.category}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                    <button onClick={() => { setActivePlanId(lp.id); setLpFormData(lp); setShowPlanningModal(true); }} className="p-3 theme-primary hover:theme-light-bg rounded-xl transition-all"><Edit className="w-5 h-5" /></button>
-                    <button onClick={() => onDeletePlan(lp.id)} className="p-3 text-red-400 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-5 h-5" /></button>
-                  </div>
-                </div>
-              ))}
+           
+           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+              <table className="w-full text-left border-collapse">
+                 <thead className="sticky top-0 bg-white z-10 border-b border-slate-100">
+                    <tr>
+                       <th className="py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">Date</th>
+                       <th className="py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">Real</th>
+                       <th className="py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">Plan</th>
+                    </tr>
+                 </thead>
+                 <tbody className="divide-y divide-slate-50">
+                    {archiveData.map((item) => (
+                       <tr key={item.date} className="group hover:bg-slate-50 transition-colors">
+                          <td className="py-4 text-[10px] font-black text-slate-500 w-16">{item.date.split('-').slice(1).join('/')}</td>
+                          
+                          {/* REAL SCHEDULE */}
+                          <td className="py-4">
+                             {item.real ? (
+                                <div className="flex items-center justify-between gap-2">
+                                   <div onClick={() => { setActivePlanId(item.real!.id); setLpFormData(item.real!); setShowPlanningModal(true); }} className="cursor-pointer">
+                                      <p className="text-[10px] font-bold text-slate-700 line-clamp-1">{item.real.text || item.real.category}</p>
+                                      <span className={`text-[8px] px-1.5 py-0.5 rounded text-white ${item.real.status === 'COMPLETE' ? 'bg-emerald-400' : 'bg-amber-400'}`}>{item.real.status === 'COMPLETE' ? 'DONE' : 'WIP'}</span>
+                                   </div>
+                                   <button onClick={() => onDeletePlan(item.real!.id)} className="text-red-300 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                                </div>
+                             ) : (
+                                <span className="text-[9px] text-slate-300 italic">Empty</span>
+                             )}
+                          </td>
+
+                          {/* SHADOW PLAN */}
+                          <td className="py-4">
+                             {item.suggested ? (
+                                <div className="flex items-center justify-between gap-2">
+                                   <span className="text-[9px] font-bold text-blue-400 line-clamp-1" title={item.suggested}>{item.suggested}</span>
+                                   {!item.real && (
+                                      <button onClick={() => handleQuickAddFromSuggestion(item.date, item.suggested!)} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><ArrowRight className="w-3 h-3" /></button>
+                                   )}
+                                </div>
+                             ) : <span className="text-[9px] text-slate-300">-</span>}
+                          </td>
+                       </tr>
+                    ))}
+                 </tbody>
+              </table>
            </div>
         </div>
 
+        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -418,6 +569,18 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
           <div className="bg-white rounded-[3.5rem] p-12 max-w-2xl w-full shadow-2xl relative animate-in zoom-in-95 duration-200 overflow-hidden">
             <button onClick={() => setShowPlanningModal(false)} className="absolute top-10 right-10 p-2 text-slate-300 hover:text-slate-500 transition-all active:scale-90"><X className="w-8 h-8" /></button>
             <h2 className="text-3xl font-black text-slate-800 mb-10">{activePlanId ? 'Refine Lesson' : 'New Plan'}</h2>
+            
+            {/* --- SUGGESTION BOX --- */}
+            {suggestedTopic && !activePlanId && (
+               <div className="mb-8 p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between">
+                  <div>
+                     <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">Syllabus Suggestion</p>
+                     <p className="text-xs font-bold text-blue-800">{suggestedTopic}</p>
+                  </div>
+                  <button onClick={() => setLpFormData({ ...lpFormData, text: suggestedTopic })} className="px-4 py-2 bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 transition-all">Use</button>
+               </div>
+            )}
+
             <div className="space-y-8 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
               <div className="grid grid-cols-2 gap-8">
                 <div className="space-y-2">
@@ -441,6 +604,39 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             </div>
             <div className="mt-12 flex gap-4"><button onClick={() => setShowPlanningModal(false)} className="flex-1 py-5 bg-slate-50 text-slate-500 font-black uppercase text-xs rounded-2xl">Discard</button><button onClick={handleSaveLessonPlan} className="flex-1 py-5 theme-bg text-white font-black uppercase text-xs rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all">Finalize Plan</button></div>
           </div>
+        </div>
+      )}
+
+      {/* --- ROADMAP MODAL --- */}
+      {showRoadmapModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+           <div className="bg-white rounded-[3.5rem] p-10 max-w-lg w-full shadow-2xl relative animate-in zoom-in-95">
+              <div className="flex justify-between items-center mb-8">
+                 <div><h2 className="text-3xl font-black text-slate-800">Annual Tracker</h2><p className="text-xs text-slate-400 mt-1">Syllabus Planning & Automation</p></div>
+                 <button onClick={() => setShowRoadmapModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-6 h-6 text-slate-400" /></button>
+              </div>
+              
+              <div className="space-y-6">
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block mb-2">Final Exam Date</label>
+                    <input type="date" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" value={roadmapExamDate} onChange={e => setRoadmapExamDate(e.target.value)} />
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block mb-2">Topics (One per line)</label>
+                    <textarea 
+                      className="w-full h-48 p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-medium text-sm" 
+                      placeholder="Chapter 1: Intro&#10;Chapter 2: Cells&#10;Quiz 1"
+                      value={roadmapTopics}
+                      onChange={e => setRoadmapTopics(e.target.value)}
+                    />
+                    <p className="text-[10px] text-slate-400 font-bold mt-2 text-right">{roadmapTopics.split('\n').filter(t => t.trim()).length} Topics Entered</p>
+                 </div>
+                 <div className="flex gap-4">
+                    <button onClick={() => handleSaveRoadmap(false)} className="flex-1 py-4 bg-slate-50 text-slate-600 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-100 transition-all">Save as Draft</button>
+                    <button onClick={() => handleSaveRoadmap(true)} className="flex-1 py-4 theme-bg text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] transition-all">Generate All</button>
+                 </div>
+              </div>
+           </div>
         </div>
       )}
 
