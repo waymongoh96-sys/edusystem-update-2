@@ -157,11 +157,10 @@ const App: React.FC = () => {
     };
   }, [currentUser, classes.length]); 
 
-  // --- THIS FUNCTION WAS MISSING/CAUSING CRASH ---
+  // Function to delete lesson plan
   const deleteLessonPlan = async (id: string) => {
     await deleteDoc(doc(db, 'lessonPlans', id));
   };
-  // -----------------------------------------------
 
   const handleRecoverLegacyData = async () => {
     if (!currentUser || currentUser.role !== 'TEACHER') return;
@@ -229,28 +228,13 @@ const App: React.FC = () => {
                   <button onClick={handleRecoverLegacyData} disabled={isRecovering} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">{isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Recover Data</button>
                 </div>
               )}
-              <TeacherDashboard 
-                tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} 
-                onClassClick={handleNavigateToClass} onTaskClick={handleNavigateToTasks} currentUser={currentUser} 
-              />
+              <TeacherDashboard tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} onClassClick={handleNavigateToClass} onTaskClick={handleNavigateToTasks} currentUser={currentUser} />
             </>
           );
         case 'classes':
           if (selectedClassId) {
             const cls = classes.find(c => c.id === selectedClassId);
-            return cls ? (
-              <ClassDetails 
-                cls={cls} students={students} lessonPlans={lessonPlans}
-                setLessonPlans={setLessonPlans} attendance={attendance}
-                setAttendance={setAttendance} settings={settings}
-                examResults={examResults} setExamResults={setExamResults}
-                onBack={() => setSelectedClassId(null)}
-                // FIX: Ensure this function is passed correctly
-                onDeletePlan={deleteLessonPlan}
-                updateClass={syncClassUpdate}
-                currentUser={currentUser} 
-              />
-            ) : null;
+            return cls ? <ClassDetails cls={cls} students={students} lessonPlans={lessonPlans} setLessonPlans={setLessonPlans} attendance={attendance} setAttendance={setAttendance} settings={settings} examResults={examResults} setExamResults={setExamResults} onBack={() => setSelectedClassId(null)} onDeletePlan={deleteLessonPlan} updateClass={syncClassUpdate} currentUser={currentUser} /> : null;
           }
           return <ClassRegistry classes={classes} onSelectClass={handleNavigateToClass} settings={settings} lessonPlans={lessonPlans} currentUser={currentUser} />;
         case 'tasks': return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
@@ -258,7 +242,18 @@ const App: React.FC = () => {
         default: return null;
       }
     }
-    if (currentUser.role === 'STUDENT') return <StudentDashboard student={currentUser} classes={classes} attendance={attendance} examResults={examResults} />;
+    if (currentUser.role === 'STUDENT') {
+      // --- ADDED: Pass lessonPlans to StudentDashboard ---
+      return (
+        <StudentDashboard 
+          student={currentUser} 
+          classes={classes} 
+          attendance={attendance} 
+          examResults={examResults}
+          lessonPlans={lessonPlans} 
+        />
+      );
+    }
     return null;
   };
 
