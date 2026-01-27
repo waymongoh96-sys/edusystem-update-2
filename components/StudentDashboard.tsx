@@ -4,26 +4,24 @@ import {
   CheckCircle2, AlertCircle, ChevronLeft, BarChart3, Sparkles, FileText
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
-import { User, Class, AttendanceRecord, ExamResult, AttendanceStatus } from '../types';
+import { User, Class, AttendanceRecord, ExamResult, AttendanceStatus, LessonPlan } from '../types';
 
 interface StudentDashboardProps {
   student: User;
   classes: Class[];
   attendance: AttendanceRecord[];
   examResults: ExamResult[];
+  lessonPlans: LessonPlan[]; // ADDED THIS PROP
 }
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ 
-  student, classes, attendance, examResults 
+  student, classes, attendance, examResults, lessonPlans 
 }) => {
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
 
-  // FIX: Updated logic to check BOTH new and legacy fields
   const enrolledClasses = useMemo(() => {
     return classes.filter(c => {
-      // 1. Get the list (handle new field, old field, or empty)
       const ids = c.enrolledStudentIds || (c as any).studentIds || [];
-      // 2. Safely check if student is included
       return Array.isArray(ids) && ids.includes(student.id);
     });
   }, [classes, student.id]);
@@ -36,6 +34,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({
         student={student} 
         attendance={attendance.filter(a => a.classId === cls.id && a.studentId === student.id)} 
         examResults={examResults.filter(r => r.classId === cls.id && r.studentId === student.id)}
+        lessonPlans={lessonPlans.filter(lp => lp.classId === cls.id)} // Filter plans for this class
         onBack={() => setSelectedClassId(null)} 
       />
     ) : null;
@@ -89,8 +88,9 @@ const StudentClassView: React.FC<{
   student: User; 
   attendance: AttendanceRecord[]; 
   examResults: ExamResult[]; 
+  lessonPlans: LessonPlan[]; // ADDED
   onBack: () => void; 
-}> = ({ cls, student, attendance, examResults, onBack }) => {
+}> = ({ cls, student, attendance, examResults, lessonPlans, onBack }) => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -99,21 +99,27 @@ const StudentClassView: React.FC<{
     const monthAtt = attendance.filter(a => new Date(a.date).getMonth() === selectedMonth);
     const presentCount = monthAtt.filter(a => a.status === AttendanceStatus.PRESENT).length;
     const attPercent = monthAtt.length > 0 ? (presentCount / monthAtt.length) * 100 : 0;
-    const avgScore = examResults.length > 0 ? examResults.reduce((acc, curr) => acc + curr.score, 0) / examResults.length : 0;
+    
+    // CHANGED: Calculate average using Daily Metrics (testScore) instead of Exam Results
+    const scoredAttendance = attendance.filter(a => a.testScore !== undefined && a.testScore !== null);
+    const avgTestScore = scoredAttendance.length > 0 
+      ? scoredAttendance.reduce((acc, curr) => acc + (curr.testScore || 0), 0) / scoredAttendance.length 
+      : 0;
+
     const latestExam = examResults.length > 0 ? [...examResults].sort((a,b) => b.id.localeCompare(a.id))[0] : null;
-    return { attPercent, avgScore, latestExam };
+    return { attPercent, avgTestScore, latestExam };
   }, [attendance, examResults, selectedMonth]);
 
   const generateAIComment = async () => {
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY_HERE" }); // Ensure this is safe or from env
+      const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY" }); 
       const notes = attendance.map(a => `${a.date}: ${a.performanceComment}`).filter(n => n.length > 10).join('\n');
       const response = await ai.models.generateContent({
         model: 'gemini-2.0-flash',
         contents: `Act as a supportive academic mentor. Based on these teacher notes for student ${student.name} in class ${cls.name}, provide a supportive 2-sentence summary of their performance and one encouraging tip for next month. 
         Teacher's Notes:
-        ${notes || "The student has been attending class regularly and participating well."}`,
+        ${notes || "The student has been attending class regularly."}`,
       });
       setAiAnalysis(response.text);
     } catch (e) {
@@ -145,9 +151,9 @@ const StudentClassView: React.FC<{
 
         <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
            <div className="p-3 theme-light-bg rounded-2xl w-fit"><TrendingUp className="w-6 h-6 theme-primary" /></div>
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Average Exam Score</p>
-           <h4 className="text-4xl font-black text-slate-800">{stats.avgScore.toFixed(1)}%</h4>
-           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cumulative GPA across terms</p>
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Average Test Score</p>
+           <h4 className="text-4xl font-black text-slate-800">{stats.avgTestScore.toFixed(1)}%</h4>
+           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Based on Daily Metrics</p>
         </div>
 
         <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
@@ -162,32 +168,43 @@ const StudentClassView: React.FC<{
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm flex flex-col h-[600px]">
            <h3 className="text-2xl font-black text-slate-800 mb-10 flex items-center gap-4"><FileText className="w-8 h-8 theme-primary" /> Attendance & Metric Log</h3>
            <div className="flex-1 overflow-x-auto custom-scrollbar">
-              <table className="w-full text-left border-collapse min-w-[600px]">
+              <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead className="sticky top-0 bg-slate-50 z-10">
                   <tr className="border-b border-slate-200">
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
+                    {/* ADDED COLUMN */}
+                    <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Lesson Outline</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Teacher Insights</th>
                     <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Metric</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {attendance.sort((a,b) => b.date.localeCompare(a.date)).map(record => (
-                    <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-6 font-black text-slate-800 text-xs">{record.date}</td>
-                      <td className="px-6 py-6 text-center">
-                        <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
-                          record.status === AttendanceStatus.PRESENT ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                          record.status === AttendanceStatus.ABSENT ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
-                        }`}>{record.status}</span>
-                      </td>
-                      <td className="px-6 py-6 text-xs text-slate-500 font-medium leading-relaxed italic">"{record.performanceComment || 'Steady progress maintained.'}"</td>
-                      <td className="px-6 py-6 text-right font-black text-slate-800 text-sm">{record.testScore ? `${record.testScore}%` : '--'}</td>
-                    </tr>
-                  ))}
+                  {attendance.sort((a,b) => b.date.localeCompare(a.date)).map(record => {
+                    // FIND LESSON PLAN FOR DATE
+                    const plan = lessonPlans.find(p => p.classId === cls.id && p.date === record.date);
+                    
+                    return (
+                      <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-6 font-black text-slate-800 text-xs">{record.date}</td>
+                        <td className="px-6 py-6 text-center">
+                          <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
+                            record.status === AttendanceStatus.PRESENT ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                            record.status === AttendanceStatus.ABSENT ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'
+                          }`}>{record.status}</span>
+                        </td>
+                        {/* LESSON OUTLINE CELL */}
+                        <td className="px-6 py-6 text-xs text-slate-600 font-bold max-w-[200px] truncate">
+                          {plan ? (plan.text || plan.category) : '-'}
+                        </td>
+                        <td className="px-6 py-6 text-xs text-slate-500 font-medium leading-relaxed italic max-w-[250px]">"{record.performanceComment || 'Steady progress maintained.'}"</td>
+                        <td className="px-6 py-6 text-right font-black text-slate-800 text-sm">{record.testScore ? `${record.testScore}%` : '--'}</td>
+                      </tr>
+                    );
+                  })}
                   {attendance.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
+                      <td colSpan={5} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs italic">
                         No activity records found for this registry.
                       </td>
                     </tr>
