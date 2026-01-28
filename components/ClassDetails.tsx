@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   ChevronLeft, Plus, Edit, FileText, CheckCircle2, Clock, Trash2, 
-  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator, Map, ArrowRight, List, CheckSquare
+  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator, Map, ArrowRight, CheckSquare
 } from 'lucide-react';
 import { 
   Class, User, LessonPlan, AttendanceRecord, SystemSettings, 
@@ -74,27 +74,21 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   // --- LOGIC: Inventory Pacing System ---
   const pacingStats = useMemo(() => {
     // 1. Get the Master Inventory (syllabusList) and Schedule (roadmap)
-    const inventory = (cls as any).syllabusList || []; // Array of topic strings
-    const roadmap = (cls as any).syllabusRoadmap || {}; // Date -> Topic
+    const inventory = (cls as any).syllabusList || []; 
+    const roadmap = (cls as any).syllabusRoadmap || {}; 
     
     if (inventory.length === 0) return null;
 
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // 2. TARGET: How many unique topics SHOULD be done by today?
-    // We look at the roadmap, find dates <= today, and map them to the inventory index
+    // 2. TARGET: Unique topics scheduled by today
     const scheduledTopics = Object.entries(roadmap)
         .filter(([date]) => date <= todayStr)
         .map(([_, topic]) => topic);
-    
-    // Convert to unique set size effectively (assuming topic names are unique)
     const targetCount = new Set(scheduledTopics).size;
 
-    // 3. ACTUAL: How many unique topics are actually marked in COMPLETE lesson plans?
+    // 3. ACTUAL: Unique topics marked in COMPLETE lesson plans
     const completedPlans = lessonPlans.filter(lp => lp.classId === cls.id && lp.status === TaskStatus.COMPLETE);
-    
-    // We aggregate all 'topics' from completed plans. 
-    // Fallback: if 'topics' array doesn't exist, use 'text' (legacy support)
     const completedTopics = new Set<string>();
     completedPlans.forEach((lp: any) => {
         if (lp.topics && Array.isArray(lp.topics)) {
@@ -103,10 +97,8 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             completedTopics.add(lp.text);
         }
     });
-    
     const actualCount = completedTopics.size;
 
-    // 4. Status
     const diff = actualCount - targetCount;
     let statusColor = 'bg-emerald-500';
     if (diff < 0) statusColor = 'bg-amber-500';
@@ -116,11 +108,14 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   }, [cls, lessonPlans]);
 
   // --- LOGIC: "Catch-Up" Suggestion ---
+  const [lpFormData, setLpFormData] = useState<Partial<LessonPlan> & { topics?: string[] }>({
+    date: '', text: '', category: settings.lessonCategories[0], status: TaskStatus.HAVENT_START, materials: [], topics: []
+  });
+
   const getSmartSuggestion = () => {
     const inventory = (cls as any).syllabusList || [];
     if (inventory.length === 0) return null;
 
-    // Find all topics covered in COMPLETE or DOING lesson plans
     const coveredTopics = new Set<string>();
     lessonPlans
         .filter(lp => lp.classId === cls.id && lp.status !== TaskStatus.HAVENT_START)
@@ -129,12 +124,9 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             else if (lp.text) coveredTopics.add(lp.text);
         });
 
-    // The Suggestion is the FIRST item in the inventory that is NOT covered
     const nextTopic = inventory.find((t: string) => !coveredTopics.has(t));
-    
     if (nextTopic) return { type: 'CATCH_UP', text: nextTopic, label: 'Next in Syllabus' };
     
-    // Fallback: If all covered, check roadmap for today
     const roadmap = (cls as any).syllabusRoadmap || {};
     const todayTopic = roadmap[lpFormData.date || ''];
     if (todayTopic) return { type: 'SCHEDULED', text: todayTopic, label: 'Scheduled for Today' };
@@ -142,18 +134,16 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     return null;
   };
 
-  const [lpFormData, setLpFormData] = useState<Partial<LessonPlan> & { topics?: string[] }>({
-    date: '', text: '', category: settings.lessonCategories[0], status: TaskStatus.HAVENT_START, materials: [], topics: []
-  });
-
   const suggestion = useMemo(() => getSmartSuggestion(), [cls, lessonPlans, lpFormData.date]);
 
-  // --- LOGIC: Roadmap Generation ---
+  // --- HANDLERS (Restored & New) ---
+
+  // 1. Generate the Roadmap
   const generateRoadmap = () => {
     if (!roadmapExamDate || !roadmapTopics.trim()) return alert("Please enter details");
 
-    const topicsList = roadmapTopics.split('\n').filter(t => t.trim() !== ''); // The Inventory
-    const roadmapMap: Record<string, string> = {}; // The Schedule
+    const topicsList = roadmapTopics.split('\n').filter(t => t.trim() !== '');
+    const roadmapMap: Record<string, string> = {};
 
     const examDateObj = new Date(roadmapExamDate);
     let curr = new Date();
@@ -162,7 +152,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     const daysMap: Record<string, number> = { 'Sunday':0, 'Monday':1, 'Tuesday':2, 'Wednesday':3, 'Thursday':4, 'Friday':5, 'Saturday':6 };
     const targetDay = daysMap[cls.classDay] ?? 1;
 
-    // Assign dates
     while (index < topicsList.length && curr < examDateObj) {
         curr.setDate(curr.getDate() + 1);
         if (curr.getDay() === targetDay) {
@@ -175,15 +164,14 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
         }
     }
 
-    // Save BOTH the Inventory List AND the Roadmap Map
     const updatedClass = { ...cls, syllabusList: topicsList, syllabusRoadmap: roadmapMap };
     updateClass(updatedClass);
     setShowRoadmapModal(false);
     alert(`Roadmap Generated! ${topicsList.length} items added to inventory.`);
   };
 
+  // 2. Auto-Fill Real Lessons from Roadmap
   const handleSaveRoadmapLessons = () => {
-      // This generates real lessons from the map
       const roadmap = (cls as any).syllabusRoadmap || {};
       let count = 0;
       Object.entries(roadmap).forEach(async ([date, topic]) => {
@@ -193,8 +181,8 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
               const newPlan = {
                   id, classId: cls.id, date, 
                   category: 'Lecture', 
-                  text: topic as string, // Legacy display
-                  topics: [topic], // New Inventory Tag
+                  text: topic as string,
+                  topics: [topic],
                   status: TaskStatus.HAVENT_START, materials: []
               };
               await setDoc(doc(db, 'lessonPlans', id), newPlan);
@@ -204,10 +192,32 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       alert(`Auto-filled ${count} lesson plans.`);
   };
 
-  // --- STANDARD HANDLERS ---
+  // 3. RESTORED: Quick Add from Table Arrow
+  const handleQuickAddFromSuggestion = async (date: string, topic: string) => {
+      const planId = Date.now().toString();
+      const planData: LessonPlan = { 
+          id: planId, classId: cls.id, date, 
+          category: 'Lecture', 
+          text: topic, 
+          // @ts-ignore - Handle optional field
+          topics: [topic],
+          status: TaskStatus.HAVENT_START, materials: [] 
+      };
+      await setDoc(doc(db, 'lessonPlans', planId), planData);
+  };
+
+  // 4. RESTORED: File Upload Logic
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const newMedia = { name: file.name, url: '#' };
+      setLpFormData(prev => ({ ...prev, materials: [...(prev.materials || []), newMedia] }));
+    }
+  };
+
+  // 5. Save Manual Plan
   const handleSaveLessonPlan = async () => {
     const planId = activePlanId || Date.now().toString();
-    // Use the selected topics to auto-fill the 'text' field if empty, for backward compatibility
     const finalText = lpFormData.text || (lpFormData.topics && lpFormData.topics.length > 0 ? lpFormData.topics.join(', ') : '');
     
     const planData: LessonPlan = { 
@@ -248,7 +258,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     });
   }, [lessonPlans, cls]);
 
-  // --- Standard Functions (No Change) ---
+  // --- Standard Logic ---
   const isTestDay = useMemo(() => {
     const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
     if (!plan) return false;
@@ -297,15 +307,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     const record: ExamResult = { id: examId, classId: cls.id, studentId, examName, score: val };
     await setDoc(doc(db, 'examResults', examId), record);
   };
-
-  const analyticsData = useMemo(() => {
-    const data = enrolledStudents.map(s => {
-      const targetScore = examResults.find(r => r.classId === cls.id && r.studentId === s.id && r.examName === selectedGraphExam)?.score || 0;
-      return { id: s.id, name: s.name, current: targetScore };
-    }).sort((a, b) => b.current - a.current);
-    const average = data.length > 0 ? data.reduce((acc, curr) => acc + curr.current, 0) / data.length : 0;
-    return { data, average };
-  }, [enrolledStudents, examResults, selectedGraphExam, cls.id]);
 
   const getAttendanceBtnStyle = (opt: typeof ATTENDANCE_OPTIONS[0], currentStatus: string | undefined) => {
     const isActive = currentStatus === opt.value;
@@ -407,6 +408,9 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                              {item.suggested ? (
                                 <div className="flex items-center justify-between gap-2">
                                    <span className="text-[9px] font-bold text-blue-400 line-clamp-1" title={item.suggested}>{item.suggested}</span>
+                                   {!item.real && (
+                                      <button onClick={() => handleQuickAddFromSuggestion(item.date, item.suggested!)} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><ArrowRight className="w-3 h-3" /></button>
+                                   )}
                                 </div>
                              ) : <span className="text-[9px] text-slate-300">-</span>}
                           </td>
@@ -583,8 +587,8 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                     <p className="text-[10px] text-slate-400 font-bold mt-2 text-right">{roadmapTopics.split('\n').filter(t => t.trim()).length} Topics Entered</p>
                  </div>
                  <div className="flex gap-4">
-                    <button onClick={() => handleSaveRoadmap(false)} className="flex-1 py-4 bg-slate-50 text-slate-600 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-100 transition-all">Save as Draft</button>
-                    <button onClick={() => handleSaveRoadmapLessons()} className="flex-1 py-4 theme-bg text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] transition-all">Generate All</button>
+                    <button onClick={() => generateRoadmap()} className="flex-1 py-4 bg-slate-50 text-slate-600 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-100 transition-all">Save as Draft</button>
+                    <button onClick={() => { generateRoadmap(); setTimeout(handleSaveRoadmapLessons, 500); }} className="flex-1 py-4 theme-bg text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] transition-all">Generate All</button>
                  </div>
               </div>
            </div>
