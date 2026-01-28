@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Palette, ShieldAlert, Plus, Trash2, CheckCircle2, ListChecks, Calendar, Clock } from 'lucide-react';
+import { Palette, ShieldAlert, Plus, Trash2, CheckCircle2, ListChecks, Calendar, Clock, Upload, X } from 'lucide-react';
 import { SystemSettings, Holiday, User } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { db } from '../firebase';
@@ -7,12 +7,16 @@ import { doc, setDoc } from 'firebase/firestore';
 
 interface SettingsProps {
   settings: SystemSettings;
-  currentUser: User | null; // Added currentUser prop
+  currentUser: User | null; 
 }
 
 const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
   const [newHoliday, setNewHoliday] = useState({ date: '', description: '' });
   const [newLabel, setNewLabel] = useState({ key: '' as keyof SystemSettings, val: '' });
+  
+  // --- NEW: Bulk Import State ---
+  const [isBulkHolidayImporting, setIsBulkHolidayImporting] = useState(false);
+  const [bulkHolidayData, setBulkHolidayData] = useState('');
 
   const themes = [
     { name: 'Default Blue', color: 'blue', hex: '#2563eb' },
@@ -24,7 +28,6 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
   const updateSettings = async (key: keyof SystemSettings, val: any) => {
     if (!currentUser) return;
     const updated = { ...settings, [key]: val };
-    // FIX: Save settings to 'user_settings' collection with the user's ID
     await setDoc(doc(db, 'user_settings', currentUser.id), updated);
   };
 
@@ -42,6 +45,40 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
     setNewHoliday({ date: '', description: '' });
   };
 
+  // --- NEW: Bulk Import Logic ---
+  const handleBulkHolidayImport = () => {
+    if (!bulkHolidayData.trim()) return;
+    
+    const lines = bulkHolidayData.split('\n');
+    const newHolidays: Holiday[] = [];
+    
+    lines.forEach((line) => {
+      // Expect format: YYYY-MM-DD, Description
+      const parts = line.split(',');
+      if (parts.length >= 2) {
+        const date = parts[0].trim();
+        const description = parts.slice(1).join(',').trim(); // Join rest in case desc has commas
+        
+        if (date && description) {
+           newHolidays.push({
+             id: `bulk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+             date,
+             description
+           });
+        }
+      }
+    });
+
+    if (newHolidays.length > 0) {
+      updateSettings('holidays', [...settings.holidays, ...newHolidays]);
+      setBulkHolidayData('');
+      setIsBulkHolidayImporting(false);
+      alert(`Successfully added ${newHolidays.length} holidays.`);
+    } else {
+      alert("No valid holidays found. Format: YYYY-MM-DD, Description");
+    }
+  };
+
   const removeItem = (key: keyof SystemSettings, index: number) => {
     const list = settings[key] as any[];
     updateSettings(key, list.filter((_, i) => i !== index));
@@ -52,7 +89,6 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
     const updated = current.includes(day) 
       ? current.filter(d => d !== day) 
       : [...current, day];
-    // Keep them in week order
     const sorted = DAYS_OF_WEEK.filter(d => updated.includes(d));
     updateSettings('workingDays', sorted);
   };
@@ -188,14 +224,19 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
         </div>
 
         <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200 xl:col-span-2">
-           <div className="flex items-center gap-4 mb-10">
-              <div className="p-4 bg-red-50 rounded-3xl">
-                <Calendar className="w-8 h-8 text-red-500" />
-              </div>
-              <div>
-                <h3 className="text-2xl font-black text-slate-800">Academic Calendar</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Holiday Schedule</p>
-              </div>
+           <div className="flex items-center justify-between mb-10">
+             <div className="flex items-center gap-4">
+                <div className="p-4 bg-red-50 rounded-3xl">
+                  <Calendar className="w-8 h-8 text-red-500" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800">Academic Calendar</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Holiday Schedule</p>
+                </div>
+             </div>
+             <button onClick={() => setIsBulkHolidayImporting(true)} className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-600 px-5 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-200 transition-all">
+                <Upload className="w-4 h-4" /> Bulk Upload
+             </button>
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
@@ -226,6 +267,31 @@ const SettingsView: React.FC<SettingsProps> = ({ settings, currentUser }) => {
            </div>
         </div>
       </div>
+
+      {/* --- BULK IMPORT MODAL --- */}
+      {isBulkHolidayImporting && (
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-[100] backdrop-blur-sm">
+          <div className="bg-white p-8 rounded-[3rem] w-full max-w-lg shadow-2xl relative animate-in zoom-in-95">
+             <div className="flex justify-between items-center mb-6">
+               <h2 className="text-2xl font-black text-slate-800">Bulk Holiday Import</h2>
+               <button onClick={() => setIsBulkHolidayImporting(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-6 h-6 text-slate-400" /></button>
+             </div>
+             
+             <div className="space-y-4">
+                <p className="text-xs text-slate-500">Format each line as: <span className="font-mono bg-slate-100 px-1 rounded">YYYY-MM-DD, Holiday Name</span></p>
+                <textarea 
+                  className="w-full h-60 border border-slate-200 bg-slate-50 rounded-3xl p-5 font-mono text-sm outline-none focus:border-slate-400 transition-colors resize-none" 
+                  value={bulkHolidayData} 
+                  onChange={e => setBulkHolidayData(e.target.value)} 
+                  placeholder={`2024-01-01, New Year's Day\n2024-02-10, Chinese New Year\n2024-08-31, Merdeka Day`} 
+                />
+                <button onClick={handleBulkHolidayImport} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs hover:scale-[1.02] active:scale-95 transition-all shadow-xl">
+                  Import Holidays
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
