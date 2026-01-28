@@ -73,7 +73,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
 
   // --- LOGIC: Inventory Pacing System ---
   const pacingStats = useMemo(() => {
-    // 1. Get the Master Inventory (syllabusList) and Schedule (roadmap)
     const inventory = (cls as any).syllabusList || []; 
     const roadmap = (cls as any).syllabusRoadmap || {}; 
     
@@ -81,13 +80,13 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
 
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // 2. TARGET: Unique topics scheduled by today
+    // TARGET: Unique topics scheduled by today
     const scheduledTopics = Object.entries(roadmap)
         .filter(([date]) => date <= todayStr)
         .map(([_, topic]) => topic);
     const targetCount = new Set(scheduledTopics).size;
 
-    // 3. ACTUAL: Unique topics marked in COMPLETE lesson plans
+    // ACTUAL: Unique topics marked in COMPLETE lesson plans
     const completedPlans = lessonPlans.filter(lp => lp.classId === cls.id && lp.status === TaskStatus.COMPLETE);
     const completedTopics = new Set<string>();
     completedPlans.forEach((lp: any) => {
@@ -136,9 +135,8 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
 
   const suggestion = useMemo(() => getSmartSuggestion(), [cls, lessonPlans, lpFormData.date]);
 
-  // --- HANDLERS (Restored & New) ---
+  // --- HANDLERS ---
 
-  // 1. Generate the Roadmap
   const generateRoadmap = () => {
     if (!roadmapExamDate || !roadmapTopics.trim()) return alert("Please enter details");
 
@@ -170,7 +168,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     alert(`Roadmap Generated! ${topicsList.length} items added to inventory.`);
   };
 
-  // 2. Auto-Fill Real Lessons from Roadmap
   const handleSaveRoadmapLessons = () => {
       const roadmap = (cls as any).syllabusRoadmap || {};
       let count = 0;
@@ -192,21 +189,19 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
       alert(`Auto-filled ${count} lesson plans.`);
   };
 
-  // 3. RESTORED: Quick Add from Table Arrow
   const handleQuickAddFromSuggestion = async (date: string, topic: string) => {
       const planId = Date.now().toString();
       const planData: LessonPlan = { 
           id: planId, classId: cls.id, date, 
           category: 'Lecture', 
           text: topic, 
-          // @ts-ignore - Handle optional field
+          // @ts-ignore
           topics: [topic],
           status: TaskStatus.HAVENT_START, materials: [] 
       };
       await setDoc(doc(db, 'lessonPlans', planId), planData);
   };
 
-  // 4. RESTORED: File Upload Logic
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -215,7 +210,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     }
   };
 
-  // 5. Save Manual Plan
   const handleSaveLessonPlan = async () => {
     const planId = activePlanId || Date.now().toString();
     const finalText = lpFormData.text || (lpFormData.topics && lpFormData.topics.length > 0 ? lpFormData.topics.join(', ') : '');
@@ -247,7 +241,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     setShowPlanningModal(true);
   };
 
-  // --- Archive Data View ---
   const archiveData = useMemo(() => {
     const roadmap = (cls as any).syllabusRoadmap || {};
     const dates = new Set([...lessonPlans.filter(lp => lp.classId === cls.id).map(lp => lp.date), ...Object.keys(roadmap)]);
@@ -258,7 +251,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     });
   }, [lessonPlans, cls]);
 
-  // --- Standard Logic ---
   const isTestDay = useMemo(() => {
     const plan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === selectedDate);
     if (!plan) return false;
@@ -308,6 +300,19 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
     await setDoc(doc(db, 'examResults', examId), record);
   };
 
+  // --- RESTORED: Analytics Data (Fixes the crash) ---
+  const analyticsData = useMemo(() => {
+    const data = enrolledStudents.map(s => {
+      const targetScore = examResults.find(r => r.classId === cls.id && r.studentId === s.id && r.examName === selectedGraphExam)?.score || 0;
+      const latestIdx = examColumns.indexOf(selectedGraphExam);
+      const previous = latestIdx > 0 ? (examResults.find(r => r.classId === cls.id && r.studentId === s.id && r.examName === examColumns[latestIdx - 1])?.score || 0) : 0;
+      const improvement = previous > 0 ? ((targetScore - previous) / previous) * 100 : 0;
+      return { id: s.id, name: s.name, current: targetScore, improvement };
+    }).sort((a, b) => b.current - a.current);
+    const average = data.length > 0 ? data.reduce((acc, curr) => acc + curr.current, 0) / data.length : 0;
+    return { data, average };
+  }, [enrolledStudents, examResults, examColumns, selectedGraphExam, cls.id]);
+
   const getAttendanceBtnStyle = (opt: typeof ATTENDANCE_OPTIONS[0], currentStatus: string | undefined) => {
     const isActive = currentStatus === opt.value;
     if (isActive) return `${opt.color} text-white shadow-md ${opt.shadow} border-transparent scale-110`;
@@ -339,7 +344,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             <div className="flex items-center gap-4 mt-2">
                <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">{cls.classDay}s at {cls.classTime}</p>
                
-               {/* --- PACING WIDGET (INVENTORY BASED) --- */}
+               {/* --- PACING WIDGET --- */}
                {pacingStats && (
                  <div className="flex items-center gap-3 bg-white px-3 py-1 rounded-xl border border-slate-100 shadow-sm">
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Syllabus Inventory</span>
@@ -421,7 +426,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
            </div>
         </div>
 
-        {/* RIGHT COLUMN: LIVE TRACKER (Unchanged Visuals) */}
+        {/* RIGHT COLUMN: LIVE TRACKER */}
         <div className="xl:col-span-8 bg-white rounded-[3rem] p-10 border border-slate-200 shadow-sm h-[600px] flex flex-col">
            <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <h3 className="text-2xl font-black text-slate-800 flex items-center gap-4">
@@ -490,7 +495,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
         </div>
       </div>
 
-      {/* EXAM CORE (Unchanged) */}
       <div className="bg-white rounded-[4rem] p-16 border border-slate-200 shadow-sm space-y-16">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-8"><div className="flex items-center gap-6"><div className="p-5 theme-light-bg rounded-[2.5rem]"><BarChart3 className="w-10 h-10 theme-primary" /></div><div><h3 className="text-3xl font-black text-slate-800">Exam Core</h3><p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mt-2">Analytical Performance Matrix</p></div></div><div className="flex gap-4"><button onClick={() => setIsEditingExams(!isEditingExams)} className={`px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${isEditingExams ? 'theme-bg text-white shadow-xl' : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-200'}`}><Edit className="w-4 h-4 mr-2 inline" /> {isEditingExams ? 'Finalize Core' : 'Modify Registry'}</button>{isEditingExams && (<button onClick={() => { const n = `Exam ${examColumns.length + 1}`; setExamColumns([...examColumns, n]); setSelectedGraphExam(n); }} className="p-4 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-2xl hover:bg-emerald-100 transition-all"><Plus className="w-6 h-6" /></button>)}</div></div>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-20">
@@ -505,7 +509,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             <button onClick={() => setShowPlanningModal(false)} className="absolute top-10 right-10 p-2 text-slate-300 hover:text-slate-500 transition-all active:scale-90"><X className="w-8 h-8" /></button>
             <h2 className="text-3xl font-black text-slate-800 mb-10">{activePlanId ? 'Refine Lesson' : 'New Plan'}</h2>
             
-            {/* --- SMART SUGGESTION BOX --- */}
             {suggestion && !activePlanId && (
                <div className="mb-8 p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between">
                   <div>
@@ -530,7 +533,6 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
                 </div>
               </div>
 
-              {/* --- NEW: INVENTORY TOPIC SELECTOR --- */}
               <div className="space-y-2">
                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Topics Covered</label>
                  <div className="max-h-40 overflow-y-auto border border-slate-100 rounded-2xl p-2 custom-scrollbar bg-slate-50">
