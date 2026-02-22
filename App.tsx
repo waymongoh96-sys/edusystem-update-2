@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  Users, LayoutDashboard, BookOpen, ListChecks, Settings, 
+import {
+  Users, LayoutDashboard, BookOpen, ListChecks, Settings,
   LogOut, GraduationCap, UserCog, Menu, RefreshCw, AlertTriangle
 } from 'lucide-react';
-import { 
-  Role, User, Class, LessonPlan, Task, AttendanceRecord, SystemSettings, 
-  TaskStatus, UserStatus, ExamResult 
+import {
+  Role, User, Class, LessonPlan, Task, AttendanceRecord, SystemSettings,
+  TaskStatus, UserStatus, ExamResult
 } from './types';
 import { MOCK_STUDENTS, MOCK_TEACHERS, INITIAL_SETTINGS } from './constants';
 import AdminView from './components/AdminView';
@@ -46,7 +46,7 @@ const App: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
-  
+
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
@@ -56,7 +56,7 @@ const App: React.FC = () => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase();
         const username = email.split('@')[0];
-        
+
         let finalUserData: User = {
           id: firebaseUser.uid,
           name: firebaseUser.displayName || username,
@@ -71,23 +71,23 @@ const App: React.FC = () => {
           // Check Teacher
           const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
           if (teacherDoc.exists()) {
-             finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
+            finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
           } else {
             // Check Student
             const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
             if (studentDoc.exists()) {
-               finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
+              finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
             } else {
-               // BRIDGE LOGIC: Link Google Login to Bulk Import ID
-               const studentQuery = query(collection(db, 'students'), where('username', '==', username));
-               const studentSnap = await getDocs(studentQuery);
-               
-               if (!studentSnap.empty) {
-                 const match = studentSnap.docs[0];
-                 finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
-               } else if (username.endsWith('.teacher')) {
-                 finalUserData.role = 'TEACHER';
-               }
+              // BRIDGE LOGIC: Link Google Login to Bulk Import ID
+              const studentQuery = query(collection(db, 'students'), where('username', '==', username));
+              const studentSnap = await getDocs(studentQuery);
+
+              if (!studentSnap.empty) {
+                const match = studentSnap.docs[0];
+                finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
+              } else if (username.endsWith('.teacher')) {
+                finalUserData.role = 'TEACHER';
+              }
             }
           }
         }
@@ -106,13 +106,13 @@ const App: React.FC = () => {
 
     let qClasses = query(collection(db, 'classes'));
     let qTasks = query(collection(db, 'tasks'));
-    
+
     if (currentUser.role === 'TEACHER') {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
       // Students fetch ALL classes to support both legacy and new ID formats
-      qClasses = query(collection(db, 'classes')); 
+      qClasses = query(collection(db, 'classes'));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
@@ -122,15 +122,15 @@ const App: React.FC = () => {
       if (currentUser.role === 'STUDENT') {
         loadedClasses = loadedClasses.filter(c => {
           const enrolled = c.enrolledStudentIds || [];
-          const legacy = (c as any).studentIds || []; 
+          const legacy = (c as any).studentIds || [];
           return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
         });
       }
       setClasses(loadedClasses);
     });
-    
+
     const unsubTasks = onSnapshot(qTasks, (snap) => setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))));
-    
+
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
       if (currentUser.role !== 'ADMIN') {
@@ -146,16 +146,16 @@ const App: React.FC = () => {
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => setTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
-    const unsubSettings = onSnapshot(doc(db, 'user_settings', currentUser.id), (snap) => { 
-      if (snap.exists()) setSettings(snap.data() as SystemSettings); 
+    const unsubSettings = onSnapshot(doc(db, 'user_settings', currentUser.id), (snap) => {
+      if (snap.exists()) setSettings(snap.data() as SystemSettings);
       else setSettings(INITIAL_SETTINGS);
     });
 
     return () => {
-      unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance(); 
+      unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance();
       unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
     };
-  }, [currentUser, classes.length]); 
+  }, [currentUser, classes.length]);
 
   // Function to delete lesson plan
   const deleteLessonPlan = async (id: string) => {
@@ -186,15 +186,15 @@ const App: React.FC = () => {
 
   const allTasks = useMemo(() => {
     const autoTasks: Task[] = lessonPlans.filter(lp => lp.status !== TaskStatus.COMPLETE).map(lp => {
-        const cls = classes.find(c => c.id === lp.classId);
-        return { id: `lp-${lp.classId}-${lp.id}`, name: `Prepare: ${cls?.name || 'Lesson'} (${lp.date})`, dueDate: lp.date, category: 'Preparation', status: lp.status };
-      });
+      const cls = classes.find(c => c.id === lp.classId);
+      return { id: `lp-${lp.classId}-${lp.id}`, name: `Prepare: ${cls?.name || 'Lesson'} (${lp.date})`, dueDate: lp.date, category: 'Preparation', status: lp.status };
+    });
     return [...autoTasks, ...tasks];
   }, [lessonPlans, tasks, classes]);
 
   const primaryColor = useMemo(() => THEME_MAP[settings.themeColor] || THEME_MAP.blue, [settings.themeColor]);
   const handleLogout = () => signOut(auth);
-  
+
   const handleNavigateToClass = (classId: string) => {
     setSelectedClassId(classId);
     setActiveMenu('classes');
@@ -242,22 +242,27 @@ const App: React.FC = () => {
         default: return null;
       }
     }
-    if (currentUser.role === 'STUDENT') {
-      // --- ADDED: Pass lessonPlans to StudentDashboard ---
-      return (
-        <StudentDashboard 
-          student={currentUser} 
-          classes={classes} 
-          attendance={attendance} 
-          examResults={examResults}
-          lessonPlans={lessonPlans} 
-        />
-      );
-    }
     return null;
   };
 
   const currentMenuItems = menuItems[currentUser.role] || [];
+
+  if (currentUser.role === 'STUDENT') {
+    return (
+      <div className="min-h-screen bg-slate-50/50 pb-20 md:pb-0">
+        <style>{`:root { --primary-color: ${primaryColor}; --primary-light: ${primaryColor}15; } .theme-primary { color: var(--primary-color) !important; } .theme-bg { background-color: var(--primary-color) !important; } .theme-border { border-color: var(--primary-color) !important; } .theme-ring { --tw-ring-color: var(--primary-color) !important; } .theme-light-bg { background-color: var(--primary-light) !important; }`}</style>
+        <StudentDashboard
+          student={currentUser}
+          classes={classes}
+          attendance={attendance}
+          examResults={examResults}
+          lessonPlans={lessonPlans}
+          settings={settings}
+          onLogout={handleLogout}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-50/50">
