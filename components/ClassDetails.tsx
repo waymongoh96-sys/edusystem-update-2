@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator, Map, ArrowRight, CheckSquare, MessageSquare
+  Users, ChevronRight, Search, X, BarChart3, TrendingUp, Paperclip, File, UserMinus, Filter, Calculator, Map, ArrowRight, CheckSquare, MessageSquare,
+  ChevronLeft, Plus, Edit, FileText, CheckCircle2, Clock, Trash2
 } from 'lucide-react';
 import {
   Class, User, LessonPlan, AttendanceRecord, SystemSettings,
@@ -206,16 +207,15 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
   };
 
   const handleQuickAddFromSuggestion = async (date: string, topic: string) => {
-    const planId = Date.now().toString();
-    const planData: LessonPlan = {
-      id: planId, classId: cls.id, date,
+    const planData = {
+      class_id: cls.id,
+      date,
       category: 'Lecture',
-      text: topic,
-      // @ts-ignore
-      topics: [topic],
-      status: TaskStatus.HAVENT_START, materials: []
+      topic: topic,
+      status: TaskStatus.HAVENT_START,
+      materials: []
     };
-    await setDoc(doc(db, 'lessonPlans', planId), planData);
+    await supabase.from('lesson_plans').insert(planData);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -694,6 +694,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
           </div>
         </div>
       )}
+
       {showFeedbackModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[150] p-4">
           <div className="bg-white rounded-[3rem] p-8 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95">
