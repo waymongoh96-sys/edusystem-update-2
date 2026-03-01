@@ -1,9 +1,10 @@
-
 import React, { useState } from 'react';
 import { GraduationCap, Lock, User as UserIcon, Shield } from 'lucide-react';
 import { supabase } from '../supabase';
+import { useNavigate } from 'react-router-dom'; // Added for navigation
 
 const Login: React.FC = () => {
+  const navigate = useNavigate(); // Initialize the navigation hook
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,12 +21,17 @@ const Login: React.FC = () => {
     try {
       let loginEmail = email.trim().toLowerCase();
 
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password,
       });
 
       if (error) throw error;
+
+      // REDIRECT: If login is successful, move the user to the dashboard
+      if (data?.user) {
+        navigate('/dashboard'); // Ensure this matches your route in App.tsx
+      }
     } catch (err: any) {
       setError(err.message || 'Authentication failed.');
       console.error("Login error:", err);
@@ -106,7 +112,10 @@ const Login: React.FC = () => {
           <p className="mt-3 text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em]">Central Terminal Access</p>
         </div>
 
-        <form className="mt-12 bg-white rounded-[3.5rem] p-12 shadow-2xl space-y-6" onSubmit={isRegister ? handleRegister : handleLogin}>
+        <form 
+          className="mt-12 bg-white rounded-[3.5rem] p-12 shadow-2xl space-y-6" 
+          onSubmit={isRegister ? handleRegister : handleLogin}
+        >
           {error && (
             <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 animate-shake">
               <Shield className="w-5 h-5 text-red-500" />
@@ -121,6 +130,8 @@ const Login: React.FC = () => {
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
                     required
+                    name="full_name"
+                    id="full_name"
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-5 pl-14 pr-6 outline-none font-bold text-sm focus:ring-4 focus:ring-blue-100 transition-all"
                     placeholder="Full Name"
                     value={name}
@@ -131,6 +142,8 @@ const Login: React.FC = () => {
                   <Shield className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
                     required
+                    name="invite_code"
+                    id="invite_code"
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-5 pl-14 pr-6 outline-none font-bold text-sm focus:ring-4 focus:ring-blue-100 transition-all"
                     placeholder="Invitation Code"
                     value={inviteCode}
@@ -144,6 +157,8 @@ const Login: React.FC = () => {
               <input
                 required
                 type="email"
+                name="email"
+                id="email"
                 autoComplete="email"
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-5 pl-14 pr-6 outline-none font-bold text-sm focus:ring-4 focus:ring-blue-100 transition-all"
                 placeholder="Email Address"
@@ -156,6 +171,8 @@ const Login: React.FC = () => {
               <input
                 required
                 type="password"
+                name="password"
+                id="password"
                 autoComplete="current-password"
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-5 pl-14 pr-6 outline-none font-bold text-sm focus:ring-4 focus:ring-blue-100 transition-all"
                 placeholder="Secure Password"
