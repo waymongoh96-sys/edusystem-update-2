@@ -34,6 +34,7 @@ export interface User {
   status: UserStatus;
   age?: number;
   standard?: string;
+  avatar_url?: string;
 }
 
 export interface Class {
@@ -49,9 +50,11 @@ export interface Class {
 
 export interface LessonPlan {
   id: string;
-  classId: string;
+  classId?: string;
+  class_id?: string;
   date: string;
-  text: string;
+  topic?: string;
+  text?: string;
   category: string;
   status: TaskStatus;
   materials: { name: string; url: string }[];
@@ -59,13 +62,17 @@ export interface LessonPlan {
 
 export interface AttendanceRecord {
   id: string;
-  classId: string;
-  studentId: string;
+  classId?: string;
+  class_id?: string;
+  studentId?: string;
+  student_id?: string;
   date: string;
-  status: AttendanceStatus;
+  status: AttendanceStatus | string;
   reason?: string;
-  performanceComment: string;
-  testScore?: string;
+  performanceComment?: string;
+  performance_comment?: string;
+  testScore?: number | null;
+  test_score?: number | null;
 }
 
 export interface ExamResult {
@@ -99,4 +106,67 @@ export interface SystemSettings {
   workingDays: string[];
   startHour: number;
   endHour: number;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content?: string;
+  image_url?: string;
+  target_standard?: string;
+  target_student_ids?: string[];
+  is_global: boolean;
+  published_by: string;
+  created_at: string;
+}
+
+export interface CommunityPost {
+  id: string;
+  title: string;
+  content: string;
+  image_url?: string;
+  category: 'NEWS' | 'EVENT' | 'COMMUNITY';
+  status: 'PENDING' | 'APPROVED';
+  author_id: string;
+  created_at: string;
+}
+
+export interface Invoice {
+  id: string;
+  student_id: string;
+  description?: string;
+  amount: number;
+  balance?: number;
+  currency: string;
+  status: 'UNPAID' | 'PARTIAL' | 'PAID' | 'OVERDUE';
+  due_date?: string;
+  date?: string;
+  created_at: string;
+}
+
+export interface Payment {
+  id: string;
+  invoice_id: string;
+  amount: number;
+  method: 'CASH' | 'BANK_TRANSFER';
+  paid_at: string;
+}
+
+export interface InvitationCode {
+  id?: string;
+  code: string;
+  target_name?: string;
+  target_standard?: string;
+  standard?: string;
+  used_by?: string;
+  status?: 'ACTIVE' | 'USED' | 'EXPIRED';
+  is_active?: boolean;
+}
+
+export interface FeedbackTemplate {
+  id: string;
+  type: 'TEACHING' | 'EXERCISE' | 'TEST';
+  en: string;
+  ms: string;
+  zh: string;
 }

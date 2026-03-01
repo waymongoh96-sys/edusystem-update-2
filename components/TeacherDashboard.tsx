@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Calendar as CalendarIcon, Clock, CheckCircle2, 
-  ChevronLeft, ChevronRight, ListChecks, ArrowRight, X, AlertCircle, Eye, EyeOff
+import {
+  ChevronLeft, ChevronRight, ListChecks, ArrowRight, X, AlertCircle, Eye, EyeOff, MessageSquare, Megaphone, Sparkles, PlusSquare
 } from 'lucide-react';
 import { Task, Class, SystemSettings, TaskStatus } from '../types';
+import { supabase } from '../supabase';
 
 interface DashboardProps {
   tasks: Task[];
@@ -14,12 +14,15 @@ interface DashboardProps {
   onTaskClick: () => void;
 }
 
-const TeacherDashboard: React.FC<DashboardProps> = ({ 
-  tasks, classes, lessonPlans, settings, onClassClick, onTaskClick 
+const TeacherDashboard: React.FC<DashboardProps> = ({
+  tasks, classes, lessonPlans, settings, onClassClick, onTaskClick
 }) => {
   const [viewMode, setViewMode] = useState<'WEEK' | 'MONTH'>('WEEK');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [showPostModal, setShowPostModal] = useState(false);
+  const [postData, setPostData] = useState({ title: '', content: '', category: 'NEWS' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const today = new Date();
 
   const toLocalDateString = (date: Date) => {
@@ -39,7 +42,7 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
     const day = start.getDay();
     const diff = start.getDate() - day + (day === 0 ? -6 : 1);
     start.setDate(diff);
-    
+
     const allWeek = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
@@ -83,7 +86,7 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
   };
 
   const getStatusColor = (status: TaskStatus) => {
-    switch(status) {
+    switch (status) {
       case TaskStatus.HAVENT_START: return 'bg-red-500';
       case TaskStatus.DOING: return 'bg-amber-400';
       case TaskStatus.COMPLETE: return 'bg-emerald-500';
@@ -107,29 +110,35 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">System Terminal</h1>
           <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1">Operational Overview</p>
         </div>
-        
-        <div className="flex items-center gap-4 bg-white p-2 rounded-[2rem] border border-slate-200 shadow-sm">
-          <div className="flex bg-slate-100 p-1 rounded-2xl">
-            <button 
-              onClick={() => setViewMode('WEEK')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black transition-all ${viewMode === 'WEEK' ? 'bg-white shadow-sm theme-primary' : 'text-slate-500'}`}
-            >
-              WEEK
-            </button>
-            <button 
-              onClick={() => setViewMode('MONTH')}
-              className={`px-6 py-2 rounded-xl text-[10px] font-black transition-all ${viewMode === 'MONTH' ? 'bg-white shadow-sm theme-primary' : 'text-slate-500'}`}
-            >
-              MONTH
-            </button>
-          </div>
-          <div className="h-6 w-px bg-slate-200" />
-          <div className="flex items-center gap-2">
-            <button onClick={handlePrev} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-5 h-5" /></button>
-            <span className="font-black text-[11px] uppercase tracking-widest min-w-[120px] text-center">
-              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </span>
-            <button onClick={handleNext} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronRight className="w-5 h-5" /></button>
+
+        <div className="flex items-center gap-4">
+          <button onClick={() => setShowPostModal(true)} className="theme-bg text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg shadow-blue-500/20 uppercase tracking-widest flex items-center gap-2">
+            <PlusSquare className="w-4 h-4" /> Post Update
+          </button>
+
+          <div className="flex items-center gap-4 bg-white p-2 rounded-[2rem] border border-slate-200 shadow-sm">
+            <div className="flex bg-slate-100 p-1 rounded-2xl">
+              <button
+                onClick={() => setViewMode('WEEK')}
+                className={`px-6 py-2 rounded-xl text-[10px] font-black transition-all ${viewMode === 'WEEK' ? 'bg-white shadow-sm theme-primary' : 'text-slate-500'}`}
+              >
+                WEEK
+              </button>
+              <button
+                onClick={() => setViewMode('MONTH')}
+                className={`px-6 py-2 rounded-xl text-[10px] font-black transition-all ${viewMode === 'MONTH' ? 'bg-white shadow-sm theme-primary' : 'text-slate-500'}`}
+              >
+                MONTH
+              </button>
+            </div>
+            <div className="h-6 w-px bg-slate-200" />
+            <div className="flex items-center gap-2">
+              <button onClick={handlePrev} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-5 h-5" /></button>
+              <span className="font-black text-[11px] uppercase tracking-widest min-w-[120px] text-center">
+                {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </span>
+              <button onClick={handleNext} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronRight className="w-5 h-5" /></button>
+            </div>
           </div>
         </div>
       </div>
@@ -138,76 +147,76 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
         <div className="xl:col-span-8 overflow-hidden h-full">
           {viewMode === 'WEEK' ? (
             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
-               {/* Header Row */}
-               <div className="flex border-b border-slate-100 bg-slate-50/50">
-                  <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center flex flex-col justify-center">
-                     <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Time</span>
-                  </div>
-                  {currentWeekDates.map((date, idx) => {
-                    const isToday = date.toDateString() === today.toDateString();
-                    return (
-                      <div key={idx} className={`flex-1 p-4 text-center border-r border-slate-100 last:border-r-0 ${isToday ? 'theme-light-bg' : ''}`}>
-                        <p className={`text-[9px] font-black uppercase tracking-widest mb-0.5 ${isToday ? 'theme-primary' : 'text-slate-400'}`}>
-                          {date.toLocaleDateString('en-US', { weekday: 'short' })}
-                        </p>
-                        <p className={`text-lg font-black ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{date.getDate()}</p>
-                      </div>
-                    );
-                  })}
-               </div>
-               
-               {/* Body Grid */}
-               <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-                  {dynamicHours.map(hour => (
-                    <div key={hour} className="flex min-h-[90px] border-b border-slate-50 last:border-b-0">
-                       <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center">
-                          <span className="text-[10px] font-black text-slate-400">{hour.toString().padStart(2, '0')}:00</span>
-                       </div>
-                       {currentWeekDates.map((date, dayIdx) => {
-                          const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
-                          const hourClasses = dayClasses.filter(c => parseInt(c.classTime.split(':')[0]) === hour);
-                          
-                          const dateStr = toLocalDateString(date);
-
-                          return (
-                            <div key={dayIdx} className="flex-1 p-1 flex flex-col gap-1 border-r border-slate-50 last:border-r-0 relative">
-                               {hourClasses.map(cls => {
-                                 const activePlan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === dateStr);
-                                 
-                                 return (
-                                   <div 
-                                     key={cls.id} 
-                                     onClick={() => onClassClick(cls.id)}
-                                     className="p-2 rounded-xl text-white shadow-sm hover:brightness-95 transition-all cursor-pointer group h-full flex flex-col justify-center"
-                                     style={{ backgroundColor: cls.themeColor }}
-                                   >
-                                      <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
-                                      <p className="text-[9px] font-black leading-tight line-clamp-1">{cls.name}</p>
-                                      
-                                      {/* --- LESSON PLAN INDICATOR (TEXT WRAPPING FIX) --- */}
-                                      {activePlan && (
-                                        <div className="mt-1.5 flex items-start gap-1.5 bg-black/20 rounded-lg px-2 py-1 backdrop-blur-sm w-full">
-                                           <span className="text-[8px] leading-tight shrink-0 mt-[1px]">{getPlanStatusIcon(activePlan.status)}</span>
-                                           <span className="text-[8px] font-bold text-white/90 break-words whitespace-normal leading-tight">
-                                             {activePlan.text || activePlan.category}
-                                           </span>
-                                        </div>
-                                      )}
-                                   </div>
-                                 );
-                               })}
-                               {hour === 9 && isHoliday && (
-                                  <div className="absolute inset-x-1 top-1 p-2 rounded-xl bg-red-50 border border-red-100 z-10 shadow-sm" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
-                                     <p className="text-[7px] font-black text-red-600 uppercase">Holiday</p>
-                                     <p className="text-[8px] font-bold text-red-800 truncate">{isHoliday.description}</p>
-                                  </div>
-                               )}
-                            </div>
-                          );
-                       })}
+              {/* Header Row */}
+              <div className="flex border-b border-slate-100 bg-slate-50/50">
+                <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center flex flex-col justify-center">
+                  <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Time</span>
+                </div>
+                {currentWeekDates.map((date, idx) => {
+                  const isToday = date.toDateString() === today.toDateString();
+                  return (
+                    <div key={idx} className={`flex-1 p-4 text-center border-r border-slate-100 last:border-r-0 ${isToday ? 'theme-light-bg' : ''}`}>
+                      <p className={`text-[9px] font-black uppercase tracking-widest mb-0.5 ${isToday ? 'theme-primary' : 'text-slate-400'}`}>
+                        {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                      </p>
+                      <p className={`text-lg font-black ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{date.getDate()}</p>
                     </div>
-                  ))}
-               </div>
+                  );
+                })}
+              </div>
+
+              {/* Body Grid */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+                {dynamicHours.map(hour => (
+                  <div key={hour} className="flex min-h-[90px] border-b border-slate-50 last:border-b-0">
+                    <div className="w-20 shrink-0 p-4 border-r border-slate-100 text-center">
+                      <span className="text-[10px] font-black text-slate-400">{hour.toString().padStart(2, '0')}:00</span>
+                    </div>
+                    {currentWeekDates.map((date, dayIdx) => {
+                      const { dayClasses, dayTasks, isHoliday } = getEventsForDate(date);
+                      const hourClasses = dayClasses.filter(c => parseInt(c.classTime.split(':')[0]) === hour);
+
+                      const dateStr = toLocalDateString(date);
+
+                      return (
+                        <div key={dayIdx} className="flex-1 p-1 flex flex-col gap-1 border-r border-slate-50 last:border-r-0 relative">
+                          {hourClasses.map(cls => {
+                            const activePlan = lessonPlans.find(lp => lp.classId === cls.id && lp.date === dateStr);
+
+                            return (
+                              <div
+                                key={cls.id}
+                                onClick={() => onClassClick(cls.id)}
+                                className="p-2 rounded-xl text-white shadow-sm hover:brightness-95 transition-all cursor-pointer group h-full flex flex-col justify-center"
+                                style={{ backgroundColor: cls.themeColor }}
+                              >
+                                <p className="text-[8px] font-black opacity-80 uppercase leading-none mb-1">{cls.classTime}</p>
+                                <p className="text-[9px] font-black leading-tight line-clamp-1">{cls.name}</p>
+
+                                {/* --- LESSON PLAN INDICATOR (TEXT WRAPPING FIX) --- */}
+                                {activePlan && (
+                                  <div className="mt-1.5 flex items-start gap-1.5 bg-black/20 rounded-lg px-2 py-1 backdrop-blur-sm w-full">
+                                    <span className="text-[8px] leading-tight shrink-0 mt-[1px]">{getPlanStatusIcon(activePlan.status)}</span>
+                                    <span className="text-[8px] font-bold text-white/90 break-words whitespace-normal leading-tight">
+                                      {activePlan.topic || activePlan.text || activePlan.category}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {hour === 9 && isHoliday && (
+                            <div className="absolute inset-x-1 top-1 p-2 rounded-xl bg-red-50 border border-red-100 z-10 shadow-sm" onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}>
+                              <p className="text-[7px] font-black text-red-600 uppercase">Holiday</p>
+                              <p className="text-[8px] font-bold text-red-800 truncate">{isHoliday.description}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="bg-white rounded-[2.5rem] p-6 border border-slate-200 shadow-sm h-full flex flex-col">
@@ -228,7 +237,7 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                       <span className={`text-[10px] font-black mb-1 ${isToday ? 'theme-primary' : 'text-slate-800'}`}>{day}</span>
                       <div className="flex flex-col gap-0.5 overflow-hidden">
                         {isHoliday && (
-                          <div 
+                          <div
                             onClick={() => setSelectedEvent({ type: 'HOLIDAY', ...isHoliday })}
                             className="bg-red-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black truncate cursor-pointer"
                           >
@@ -236,10 +245,10 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                           </div>
                         )}
                         {dayClasses.map(c => (
-                          <div 
-                            key={c.id} 
-                            onClick={() => setSelectedEvent({ type: 'CLASS', ...c })} 
-                            className="text-white text-[7px] px-1.5 py-0.5 rounded-md font-black truncate cursor-pointer hover:brightness-90" 
+                          <div
+                            key={c.id}
+                            onClick={() => setSelectedEvent({ type: 'CLASS', ...c })}
+                            className="text-white text-[7px] px-1.5 py-0.5 rounded-md font-black truncate cursor-pointer hover:brightness-90"
                             style={{ backgroundColor: c.themeColor }}
                           >
                             {c.name}
@@ -265,13 +274,13 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Obligations</p>
               </div>
             </div>
-            
+
             <div className="flex-1 space-y-2 overflow-y-auto custom-scrollbar pr-2">
               {tasks.filter(t => t.status !== TaskStatus.COMPLETE).map(task => {
                 const isLessonTask = task.id.startsWith('lp-');
                 return (
-                  <div 
-                    key={task.id} 
+                  <div
+                    key={task.id}
                     onClick={isLessonTask ? () => onClassClick(task.id.split('-')[1]) : onTaskClick}
                     className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100 hover:theme-border hover:bg-white transition-all group cursor-pointer"
                   >
@@ -298,57 +307,62 @@ const TeacherDashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {selectedEvent && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-           <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl relative animate-in zoom-in-95 duration-200">
-              <button onClick={() => setSelectedEvent(null)} className="absolute top-8 right-8 p-2 hover:bg-slate-100 rounded-full transition-all active:scale-90">
-                <X className="w-6 h-6 text-slate-400" />
-              </button>
-              
-              <div className="mb-6">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 ${
-                  selectedEvent.type === 'CLASS' ? 'theme-bg' : selectedEvent.type === 'HOLIDAY' ? 'bg-red-500' : 'bg-amber-400'
-                }`}>
-                  {selectedEvent.type === 'CLASS' ? <CalendarIcon className="w-6 h-6 text-white" /> : 
-                   selectedEvent.type === 'HOLIDAY' ? <AlertCircle className="w-6 h-6 text-white" /> :
-                   <ListChecks className="w-6 h-6 text-white" />}
+      {showPostModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[3rem] p-10 max-w-lg w-full shadow-2xl animate-in zoom-in-95">
+            <header className="flex justify-between items-center mb-10">
+              <div>
+                <h3 className="text-2xl font-black text-slate-800">Campus News</h3>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Share updates with the community</p>
+              </div>
+              <button onClick={() => setShowPostModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-6 h-6 text-slate-400" /></button>
+            </header>
+
+            <div className="space-y-6">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block mb-2">Subject</label>
+                <input className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none theme-border" placeholder="News title..." value={postData.title} onChange={e => setPostData({ ...postData, title: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block mb-2">Category</label>
+                <div className="flex gap-2">
+                  {['NEWS', 'EVENT', 'COMMUNITY'].map(cat => (
+                    <button key={cat} onClick={() => setPostData({ ...postData, category: cat })} className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase transition-all ${postData.category === cat ? 'theme-bg text-white' : 'bg-slate-50 text-slate-400'}`}>
+                      {cat}
+                    </button>
+                  ))}
                 </div>
-                <h3 className="text-2xl font-black text-slate-800 mb-2">{selectedEvent.name || selectedEvent.description}</h3>
-                <p className="text-[10px] font-black theme-primary uppercase tracking-[0.2em]">{selectedEvent.type} Details</p>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block mb-2">Content</label>
+                <textarea className="w-full h-32 p-4 bg-slate-50 border border-slate-100 rounded-2xl font-medium text-sm outline-none theme-border" placeholder="Describe the update..." value={postData.content} onChange={e => setPostData({ ...postData, content: e.target.value })} />
               </div>
 
-              <div className="space-y-4 border-t border-slate-100 pt-6">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="font-bold text-slate-400 uppercase text-[10px]">Date/Time</span>
-                  <span className="font-black text-slate-700">
-                    {selectedEvent.date || `${selectedEvent.classDay} ${selectedEvent.classTime}` || selectedEvent.dueDate}
-                  </span>
-                </div>
-                {selectedEvent.category && (
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-slate-400 uppercase text-[10px]">Category</span>
-                    <span className="font-black theme-primary bg-primary-light px-2 py-0.5 rounded-lg border border-primary text-[10px] uppercase">
-                      {selectedEvent.category}
-                    </span>
-                  </div>
-                )}
-                {selectedEvent.status && (
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-slate-400 uppercase text-[10px]">Status</span>
-                    <span className={`font-black text-white px-3 py-1 rounded-full text-[10px] uppercase ${getStatusColor(selectedEvent.status)}`}>
-                      {selectedEvent.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                onClick={() => setSelectedEvent(null)}
-                className="w-full mt-10 py-4 theme-bg text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all"
+              <button
+                disabled={isSubmitting || !postData.title || !postData.content}
+                onClick={async () => {
+                  setIsSubmitting(true);
+                  const { error } = await supabase.from('community_posts').insert({
+                    title: postData.title,
+                    content: postData.content,
+                    category: postData.category,
+                    status: 'PENDING',
+                    created_at: new Date().toISOString()
+                  });
+                  if (error) alert(error.message);
+                  else {
+                    alert("Post submitted for Admin review!");
+                    setShowPostModal(false);
+                    setPostData({ title: '', content: '', category: 'NEWS' });
+                  }
+                  setIsSubmitting(false);
+                }}
+                className="w-full py-5 theme-bg text-white font-black uppercase text-xs tracking-widest rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
               >
-                Close Details
+                {isSubmitting ? 'Transmitting...' : 'Submit for Review'}
               </button>
-           </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

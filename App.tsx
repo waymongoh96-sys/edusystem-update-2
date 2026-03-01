@@ -47,13 +47,25 @@ const App: React.FC = () => {
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
 
+  // Supabase Data State
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>([]);
+
   // Debug State
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // 1. INTELLIGENT ROLE & ID DETECTION
+  // 1. INTELLIGENT ROLE & ID DETECTION (Supabase & Firebase)
   useEffect(() => {
+    const fetchProfile = async (uid: string) => {
+      const { data } = await supabase.from('profiles').select('*').eq('id', uid).single();
+      return data;
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        const profile = await fetchProfile(firebaseUser.uid);
         const email = (firebaseUser.email || '').toLowerCase();
         const username = email.split('@')[0];
 
@@ -62,32 +74,23 @@ const App: React.FC = () => {
           name: firebaseUser.displayName || username,
           username: username,
           status: UserStatus.ACTIVE,
-          role: 'STUDENT' // Default fallback
+          role: 'STUDENT',
+          avatar_url: profile?.avatar_url
         };
 
-        if (username.includes('admin')) {
+        if (profile) {
+          finalUserData = { ...finalUserData, ...profile };
+        } else if (username.includes('admin')) {
           finalUserData.role = 'ADMIN';
         } else {
-          // Check Teacher
+          // Fallback to legacy checks
           const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
           if (teacherDoc.exists()) {
             finalUserData = { ...finalUserData, ...teacherDoc.data(), role: 'TEACHER' };
           } else {
-            // Check Student
             const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
             if (studentDoc.exists()) {
               finalUserData = { ...finalUserData, ...studentDoc.data(), role: 'STUDENT' };
-            } else {
-              // BRIDGE LOGIC: Link Google Login to Bulk Import ID
-              const studentQuery = query(collection(db, 'students'), where('username', '==', username));
-              const studentSnap = await getDocs(studentQuery);
-
-              if (!studentSnap.empty) {
-                const match = studentSnap.docs[0];
-                finalUserData = { ...finalUserData, ...match.data(), id: match.id, role: 'STUDENT' };
-              } else if (username.endsWith('.teacher')) {
-                finalUserData.role = 'TEACHER';
-              }
             }
           }
         }
@@ -100,10 +103,27 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. DATA ISOLATION
+  // 2. DATA ISOLATION & SYNC (Supabase + Firebase)
   useEffect(() => {
     if (!currentUser) return;
 
+    // Supabase Real-time Subscriptions
+    const subHolidays = supabase.channel('holidays').on('postgres_changes', { event: '*', schema: 'public', table: 'holidays' }, fetchData).subscribe();
+    const subAnnouncements = supabase.channel('announcements').on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, fetchData).subscribe();
+
+    async function fetchData() {
+      const { data: hData } = await supabase.from('holidays').select('*');
+      if (hData) setHolidays(hData);
+
+      const { data: aData } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
+      if (aData) setAnnouncements(aData);
+
+      const { data: iData } = await supabase.from('invoices').select('*').eq('student_id', currentUser?.id);
+      if (iData) setInvoices(iData);
+    }
+    fetchData();
+
+    // Firebase Legacy Subscriptions
     let qClasses = query(collection(db, 'classes'));
     let qTasks = query(collection(db, 'tasks'));
 
@@ -111,37 +131,25 @@ const App: React.FC = () => {
       qClasses = query(collection(db, 'classes'), where('teacherId', '==', currentUser.id));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     } else if (currentUser.role === 'STUDENT') {
-      // Students fetch ALL classes to support both legacy and new ID formats
       qClasses = query(collection(db, 'classes'));
       qTasks = query(collection(db, 'tasks'), where('userId', '==', currentUser.id));
     }
 
     const unsubClasses = onSnapshot(qClasses, (snap) => {
       let loadedClasses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Class));
-      // Student Filter Logic
       if (currentUser.role === 'STUDENT') {
-        loadedClasses = loadedClasses.filter(c => {
-          const enrolled = c.enrolledStudentIds || [];
-          const legacy = (c as any).studentIds || [];
-          return enrolled.includes(currentUser.id) || legacy.includes(currentUser.id);
-        });
+        loadedClasses = loadedClasses.filter(c => (c.enrolledStudentIds || []).includes(currentUser.id) || ((c as any).studentIds || []).includes(currentUser.id));
       }
       setClasses(loadedClasses);
     });
 
     const unsubTasks = onSnapshot(qTasks, (snap) => setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))));
-
     const unsubLessonPlans = onSnapshot(collection(db, 'lessonPlans'), (snap) => {
       const allPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as LessonPlan));
-      if (currentUser.role !== 'ADMIN') {
-        const visibleClassIds = new Set(classes.map(c => c.id));
-        setLessonPlans(allPlans.filter(p => visibleClassIds.has(p.classId)));
-      } else {
-        setLessonPlans(allPlans);
-      }
+      const visibleIds = new Set(classes.map(c => c.id));
+      setLessonPlans(currentUser.role === 'ADMIN' ? allPlans : allPlans.filter(p => visibleIds.has(p.classId)));
     });
 
-    // Subscriptions
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord))));
     const unsubExams = onSnapshot(collection(db, 'examResults'), (snap) => setExamResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamResult))));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
@@ -154,8 +162,10 @@ const App: React.FC = () => {
     return () => {
       unsubClasses(); unsubLessonPlans(); unsubTasks(); unsubAttendance();
       unsubExams(); unsubStudents(); unsubTeachers(); unsubSettings();
+      subHolidays.unsubscribe(); subAnnouncements.unsubscribe();
     };
   }, [currentUser, classes.length]);
+
 
   // Function to delete lesson plan
   const deleteLessonPlan = async (id: string) => {
@@ -214,7 +224,7 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     if (currentUser.role === 'ADMIN') {
-      return <AdminView teachers={teachers} students={students} classes={classes} />;
+      return <AdminView teachers={teachers} students={students} classes={classes} holidays={holidays} />;
     }
 
     if (currentUser.role === 'TEACHER') {
@@ -228,7 +238,7 @@ const App: React.FC = () => {
                   <button onClick={handleRecoverLegacyData} disabled={isRecovering} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">{isRecovering ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Recover Data</button>
                 </div>
               )}
-              <TeacherDashboard tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} onClassClick={handleNavigateToClass} onTaskClick={handleNavigateToTasks} currentUser={currentUser} />
+              <TeacherDashboard tasks={allTasks} classes={classes} lessonPlans={lessonPlans} settings={settings} onClassClick={handleNavigateToClass} onTaskClick={handleNavigateToTasks} currentUser={currentUser} holidays={holidays} />
             </>
           );
         case 'classes':
@@ -238,7 +248,7 @@ const App: React.FC = () => {
           }
           return <ClassRegistry classes={classes} onSelectClass={handleNavigateToClass} settings={settings} lessonPlans={lessonPlans} currentUser={currentUser} />;
         case 'tasks': return <TaskBoard tasks={tasks} settings={settings} currentUser={currentUser} />;
-        case 'settings': return <SettingsView settings={settings} currentUser={currentUser} />;
+        case 'settings': return <SettingsView settings={settings} currentUser={currentUser} holidays={holidays} />;
         default: return null;
       }
     }
@@ -259,6 +269,9 @@ const App: React.FC = () => {
           lessonPlans={lessonPlans}
           settings={settings}
           onLogout={handleLogout}
+          announcements={announcements}
+          invoices={invoices}
+          holidays={holidays}
         />
       </div>
     );
