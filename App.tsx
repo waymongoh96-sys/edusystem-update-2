@@ -5,8 +5,9 @@ import {
 } from 'lucide-react';
 import {
   Role, User, Class, LessonPlan, Task, AttendanceRecord, SystemSettings,
-  TaskStatus, UserStatus, ExamResult
+  TaskStatus, UserStatus, ExamResult, Announcement, Holiday, Invoice, CommunityPost
 } from './types';
+import { supabase } from './supabase';
 import { MOCK_STUDENTS, MOCK_TEACHERS, INITIAL_SETTINGS } from './constants';
 import AdminView from './components/AdminView';
 import TeacherDashboard from './components/TeacherDashboard';
@@ -80,7 +81,7 @@ const App: React.FC = () => {
 
         if (profile) {
           finalUserData = { ...finalUserData, ...profile };
-        } else if (username.includes('admin')) {
+        } else if (email === 'waymongo@gmail.com') {
           finalUserData.role = 'ADMIN';
         } else {
           // Fallback to legacy checks

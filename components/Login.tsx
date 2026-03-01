@@ -19,11 +19,6 @@ const Login: React.FC = () => {
 
     try {
       let loginEmail = email.trim().toLowerCase();
-      if (loginEmail === 'admin') {
-        loginEmail = 'admin@eduassist.com';
-      } else if (!loginEmail.includes('@')) {
-        loginEmail = `${loginEmail}@eduassist.com`;
-      }
 
       const { error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
