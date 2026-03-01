@@ -693,6 +693,7 @@ const ClassDetails: React.FC<ClassDetailsProps> = ({
             </div>
           </div>
         </div>
+      )}
       {showFeedbackModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[150] p-4">
           <div className="bg-white rounded-[3rem] p-8 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95">
